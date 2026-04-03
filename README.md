@@ -4,15 +4,25 @@ External Supabase plugin package for OpenCode with separate server and TUI entry
 
 ## Install
 
-Current supported local install:
+From a consumer repo, add this plugin to both config surfaces.
 
-```bash
-opencode plugin ../opencode-supabase
+`.opencode/opencode.jsonc`
+
+```json
+{
+  "plugin": ["../opencode-supabase"]
+}
 ```
 
-Published package install via `opencode plugin opencode-supabase` is deferred until npm setup exists for this plugin.
+`.opencode/tui.jsonc`
 
-The OpenCode plugin installer detects both exported targets and patches both plugin config surfaces under `.opencode/` during a normal happy-path install.
+```json
+{
+  "plugin": ["../opencode-supabase"]
+}
+```
+
+Use a sibling checkout from the consumer repo so the relative path resolves correctly. Both files must be configured because server and TUI plugins load from separate config surfaces.
 
 ## Development
 

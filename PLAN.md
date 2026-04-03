@@ -2,7 +2,7 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Extract the Supabase prototype into a standalone dual-target plugin package that installs with `opencode plugin opencode-supabase`, exposes `/supabase` in the TUI, completes browser OAuth, persists auth for later tool use, and provides Supabase Management API tools.
+**Goal:** Extract the Supabase prototype into a standalone dual-target plugin package that loads from manual local-path config in a consumer repo, exposes `/supabase` in the TUI, completes browser OAuth, persists auth for later tool use, and provides Supabase Management API tools.
 
 **Architecture:** Ship one npm package with two target-only entrypoints, `./server` and `./tui`, because OpenCode rejects a single module exporting both `server` and `tui`; see `packages/opencode/src/plugin/shared.ts:89` and `packages/opencode/src/plugin/shared.ts:277`. Put shared OAuth and API code under `src/shared`, auth and tool logic under `src/server`, and `/supabase` command and dialog UX under `src/tui`. Persist tokens in plugin-owned storage because external tools do not get host auth-read access; see `packages/plugin/src/tool.ts:3`. Use a public PKCE OAuth client flow with `client_id` only in the extracted plugin rather than copying the prototype's secret-based exchange logic.
 
@@ -12,7 +12,7 @@
 
 ## Verified constraints from the current OpenCode codebase
 
-- Primary install story is `opencode plugin opencode-supabase`. The installer can detect both server and TUI targets and patch both plugin config surfaces in one flow; see `packages/opencode/src/plugin/install.ts:145`, `packages/opencode/src/plugin/install.ts:421`, and `packages/opencode/test/plugin/install.test.ts:112`.
+- The current OpenCode CLI in this environment does not expose a plugin install subcommand, so the Phase 1 install story must use manual config-based plugin loading from `.opencode/opencode.jsonc` and `.opencode/tui.jsonc`; see `packages/opencode/src/config/config.ts:286` and `packages/opencode/src/config/tui.ts:57`.
 - The package must expose separate `./server` and `./tui` entrypoints. TUI loading does not fall back to `main` or `exports["."]`; see `packages/opencode/src/plugin/shared.ts:89`.
 - `/supabase` should remain a TUI slash command. It can open a dialog through the public TUI plugin API; see `packages/plugin/src/tui.ts:389`.
 - The plugin can use the built-in provider OAuth endpoints through `client.provider.oauth.authorize()` and `client.provider.oauth.callback()`; see `packages/opencode/src/cli/cmd/tui/component/dialog-provider.tsx:83` and `packages/opencode/src/cli/cmd/tui/component/dialog-provider.tsx:145`.
@@ -111,7 +111,7 @@ Execute this plan in phases. Do not start a later phase until the current phase 
 
 ### Cross-phase constraints
 
-- Primary install story is `opencode plugin opencode-supabase`.
+- Primary install story for this phase is manual local-path plugin configuration from a consumer repo via `.opencode/opencode.jsonc` and `.opencode/tui.jsonc`.
 - The package must remain one npm package with separate `./server` and `./tui` entrypoints.
 - Keep provider id exactly `supabase`.
 - Do not rely on a `client_secret`; the target OAuth flow is public PKCE with `client_id` only.
@@ -130,8 +130,7 @@ Execute this plan in phases. Do not start a later phase until the current phase 
 
 **Deliverable:**
 
-- `opencode plugin opencode-supabase` works
-- local development install works
+- manual local-path installation from a consumer repo works
 - both plugin targets load
 - `/supabase` exists and opens a dialog shell
 - dialog open and close behavior works cleanly
@@ -140,16 +139,17 @@ Execute this plan in phases. Do not start a later phase until the current phase 
 
 1. `bun install`
 2. `bun run typecheck`
-3. `opencode plugin ../opencode-supabase` or `opencode plugin opencode-supabase`
-4. Start OpenCode
-5. Run `/supabase`
-6. Confirm the dialog opens and closes without loader or runtime errors
-7. Confirm both plugin config surfaces under `.opencode/` were patched for a local happy-path install
+3. In a separate consumer repo, add `../opencode-supabase` to `.opencode/opencode.jsonc`
+4. In the same consumer repo, add `../opencode-supabase` to `.opencode/tui.jsonc`
+5. Start OpenCode from the consumer repo
+6. Run `/supabase`
+7. Confirm the dialog opens and closes without loader or runtime errors
+8. Confirm both config surfaces were respected by the host
 
 **Exit criteria:**
 
-- dual-target package resolution works
-- install path works through the CLI plugin installer
+- dual-target package resolution works from config
+- both config surfaces load the plugin correctly
 - `/supabase` is visible and interactive
 
 **Deferred:** real OAuth, browser open behavior, token persistence, real Supabase API calls
@@ -175,7 +175,7 @@ Execute this plan in phases. Do not start a later phase until the current phase 
 **Manual verification:**
 
 1. `bun run typecheck`
-2. Install the plugin with `opencode plugin ...`
+2. Configure the plugin from a consumer repo using local path entries in `.opencode/opencode.jsonc` and `.opencode/tui.jsonc`
 3. Start OpenCode
 4. Run `/supabase`
 5. Confirm the plugin attempts to open the browser
@@ -270,7 +270,7 @@ Execute this plan in phases. Do not start a later phase until the current phase 
 **Manual verification:**
 
 1. Follow the README from scratch in a clean setup
-2. Install with `opencode plugin opencode-supabase` or local path
+2. Configure the plugin from a clean consumer repo using local path entries in `.opencode/opencode.jsonc` and `.opencode/tui.jsonc`
 3. Start OpenCode
 4. Run `/supabase`
 5. Complete login
@@ -286,7 +286,7 @@ Execute this plan in phases. Do not start a later phase until the current phase 
 ## Recommended execution order
 
 1. Task 1: Scaffold the dual-target package
-2. Task 2: Make install work with one `opencode plugin` command
+2. Task 2: Make manual local-path installation work across both config surfaces
 3. Task 3: Recreate `/supabase` as a dialog shell
 4. Task 4: Split shared OAuth, API, and config code
 5. Task 5: Add plugin-owned auth persistence
@@ -362,41 +362,41 @@ export default { id: "supabase", tui };
 - `bun install`
 - `bun run typecheck`
 
-## Task 2: Make install work with one `opencode plugin` command
+## Task 2: Make manual local-path installation work across both config surfaces
 
 **Files:**
 
 - Modify: `package.json`
 - Modify: `README.md`
-- Reference: `packages/opencode/src/plugin/install.ts:145`
-- Reference: `packages/opencode/src/plugin/install.ts:421`
-- Reference: `packages/opencode/src/cli/cmd/plug.ts:70`
-- Reference: `packages/opencode/test/plugin/install.test.ts:112`
+- Reference: `packages/opencode/src/config/config.ts:286`
+- Reference: `packages/opencode/src/config/tui.ts:57`
+- Reference: `packages/opencode/test/config/tui.test.ts:611`
+- Reference: `packages/opencode/test/cli/tui/plugin-loader-entrypoint.test.ts:48`
 
 **Steps**
 
 1. Keep the published package name stable as `opencode-supabase`.
-2. Ensure the package manifest exposes both plugin targets so installer target detection sees both.
-3. Document the primary install path as:
+2. Ensure the package manifest exposes both plugin targets so config-based loading can resolve both.
+3. Document the primary install path as manual local-path configuration from a consumer repo.
+4. Document that the same plugin spec must be added to both `.opencode/opencode.jsonc` and `.opencode/tui.jsonc`.
+5. Use a consumer-repo-relative example path such as:
 
-```bash
-opencode plugin opencode-supabase
+```json
+{
+  "plugin": ["../opencode-supabase"]
+}
 ```
 
-4. Document local development install as:
-
-```bash
-opencode plugin ../opencode-supabase
-```
-
-5. Explain that the CLI installer patches both server and TUI plugin config surfaces under `.opencode/`.
-6. Do not document manual `opencode.jsonc`-only install as the primary path.
+6. Explain that server and TUI load from separate config surfaces, so both files must be configured.
+7. Do not document manual `opencode.jsonc`-only install as sufficient for the full Phase 1 flow.
+8. Do not mention any CLI install command as a current install path.
 
 **Verification**
 
 - `bun run typecheck`
-- local path install with `opencode plugin ../opencode-supabase`
-- confirm both server and TUI plugin config surfaces under `.opencode/` were updated
+- from a consumer repo, add the plugin path to both config surfaces
+- start OpenCode from the consumer repo
+- confirm both targets load
 
 ## Task 3: Recreate `/supabase` as a dialog shell
 
@@ -424,6 +424,7 @@ opencode plugin ../opencode-supabase
 **Verification**
 
 - `bun run typecheck`
+- `bun test test/plugin-exports.test.ts`
 - start OpenCode
 - run `/supabase`
 - confirm the dialog opens and closes without errors
@@ -647,15 +648,15 @@ auth: {
 
 2. Show the primary install path as:
 
-```bash
-opencode plugin opencode-supabase
+```json
+{
+  "plugin": ["../opencode-supabase"]
+}
 ```
 
 3. Show the local development install path as:
 
-```bash
-opencode plugin ../opencode-supabase
-```
+Add the same local path entry to both `.opencode/opencode.jsonc` and `.opencode/tui.jsonc` in a consumer repo.
 
 4. Document required config in this priority order:
 
@@ -698,7 +699,7 @@ opencode plugin ../opencode-supabase
 
 1. `bun install`
 2. `bun run typecheck`
-3. `opencode plugin ../opencode-supabase` or `opencode plugin opencode-supabase`
+3. Configure the plugin from a consumer repo via `.opencode/opencode.jsonc` and `.opencode/tui.jsonc`
 4. Start OpenCode
 5. Run `/supabase`
 6. Confirm browser open is attempted and manual fallback is visible if needed

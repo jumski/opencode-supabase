@@ -12,9 +12,10 @@ describe("phase 1 package contract", () => {
     expect(packageJson.exports["./tui"]).toBe("./src/tui/index.tsx");
   });
 
-  test("documents local-path install as the supported current path", () => {
-    expect(readme).toContain("opencode plugin ../opencode-supabase");
-    expect(readme).not.toContain("Primary package install:");
-    expect(readme).toContain("Published package install via `opencode plugin opencode-supabase` is deferred");
+  test("documents manual config-based install from a consumer repo", () => {
+    expect(readme).toContain(".opencode/opencode.jsonc");
+    expect(readme).toContain(".opencode/tui.jsonc");
+    expect(readme).toContain('"plugin": ["../opencode-supabase"]');
+    expect(readme).not.toContain("opencode plugin opencode-supabase");
   });
 });
