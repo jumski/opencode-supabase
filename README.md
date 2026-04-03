@@ -4,17 +4,13 @@ External Supabase plugin package for OpenCode with separate server and TUI entry
 
 ## Install
 
-Primary package install:
-
-```bash
-opencode plugin opencode-supabase
-```
-
-Local development install:
+Current supported local install:
 
 ```bash
 opencode plugin ../opencode-supabase
 ```
+
+Published package install via `opencode plugin opencode-supabase` is deferred until npm setup exists for this plugin.
 
 The OpenCode plugin installer detects both exported targets and patches both plugin config surfaces under `.opencode/` during a normal happy-path install.
 

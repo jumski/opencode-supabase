@@ -6,16 +6,10 @@ type SupabaseDialogProps = {
 };
 
 export function SupabaseDialog(props: SupabaseDialogProps) {
-  return (
-    <props.api.ui.Dialog onClose={props.onClose}>
-      <box flexDirection="column" padding={1} gap={1}>
-        <text>Connect Supabase</text>
-        <text>
-          Supabase login will start here soon. This first phase only verifies that the external plugin installs
-          cleanly and can open a dedicated /supabase dialog.
-        </text>
-        <text>Press Esc to close this dialog.</text>
-      </box>
-    </props.api.ui.Dialog>
-  );
+  return props.api.ui.DialogAlert({
+    title: "Connect Supabase",
+    message:
+      "Supabase login will start here soon. This first phase only verifies that the external plugin installs cleanly and can open a dedicated /supabase dialog.",
+    onConfirm: props.onClose,
+  });
 }

@@ -4,7 +4,7 @@
     "target": "ESNext",
     "module": "Preserve",
     "moduleDetection": "force",
-    "jsx": "react-jsx",
+    "jsx": "preserve",
     "jsxImportSource": "@opentui/solid",
     "moduleResolution": "bundler",
     "allowImportingTsExtensions": true,

@@ -6,8 +6,8 @@ import { SupabaseDialog } from "./dialog";
 const tui: TuiPlugin = async (api) => {
   api.command.register(() => [
     createSupabaseCommand(() => {
-        api.ui.dialog.replace(() => <SupabaseDialog api={api} onClose={() => api.ui.dialog.clear()} />);
-      }),
+      api.ui.dialog.replace(() => SupabaseDialog({ api, onClose: () => api.ui.dialog.clear() }));
+    }),
   ]);
 };
 
