@@ -12,10 +12,11 @@ describe("phase 1 package contract", () => {
     expect(packageJson.exports["./tui"]).toBe("./src/tui/index.tsx");
   });
 
-  test("documents manual config-based install from a consumer repo", () => {
+  test("documents CLI-first install with a manual config fallback", () => {
+    expect(readme).toContain("opencode plugin ../../opencode-supabase");
     expect(readme).toContain(".opencode/opencode.jsonc");
     expect(readme).toContain(".opencode/tui.jsonc");
-    expect(readme).toContain('"plugin": ["../opencode-supabase"]');
-    expect(readme).not.toContain("opencode plugin opencode-supabase");
+    expect(readme).toContain('"plugin": ["../../opencode-supabase"]');
+    expect(readme).toContain("resolved from inside `.opencode/`, not from the consumer repo root");
   });
 });

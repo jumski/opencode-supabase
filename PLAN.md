@@ -2,7 +2,7 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Extract the Supabase prototype into a standalone dual-target plugin package that loads from manual local-path config in a consumer repo, exposes `/supabase` in the TUI, completes browser OAuth, persists auth for later tool use, and provides Supabase Management API tools.
+**Goal:** Extract the Supabase prototype into a standalone dual-target plugin package that installs through `opencode plugin` on compatible OpenCode versions, supports manual local-path configuration as a fallback, exposes `/supabase` in the TUI, completes browser OAuth, persists auth for later tool use, and provides Supabase Management API tools.
 
 **Architecture:** Ship one npm package with two target-only entrypoints, `./server` and `./tui`, because OpenCode rejects a single module exporting both `server` and `tui`; see `packages/opencode/src/plugin/shared.ts:89` and `packages/opencode/src/plugin/shared.ts:277`. Put shared OAuth and API code under `src/shared`, auth and tool logic under `src/server`, and `/supabase` command and dialog UX under `src/tui`. Persist tokens in plugin-owned storage because external tools do not get host auth-read access; see `packages/plugin/src/tool.ts:3`. Use a public PKCE OAuth client flow with `client_id` only in the extracted plugin rather than copying the prototype's secret-based exchange logic.
 
@@ -12,7 +12,8 @@
 
 ## Verified constraints from the current OpenCode codebase
 
-- The current OpenCode CLI in this environment does not expose a plugin install subcommand, so the Phase 1 install story must use manual config-based plugin loading from `.opencode/opencode.jsonc` and `.opencode/tui.jsonc`; see `packages/opencode/src/config/config.ts:286` and `packages/opencode/src/config/tui.ts:57`.
+- `opencode plugin` and external TUI plugin loading through `.opencode/tui.jsonc` require OpenCode `>= 1.3.4`. OpenCode `1.2.27` rejects the `plugin` key in `tui.jsonc`, so `/supabase` cannot be registered there.
+- Manual local-path configuration through `.opencode/opencode.jsonc` and `.opencode/tui.jsonc` remains a supported fallback on compatible OpenCode versions; relative path entries in those files resolve from inside `.opencode/`, not from the consumer repo root; see `packages/opencode/src/config/config.ts:286` and `packages/opencode/src/config/tui.ts:57`.
 - The package must expose separate `./server` and `./tui` entrypoints. TUI loading does not fall back to `main` or `exports["."]`; see `packages/opencode/src/plugin/shared.ts:89`.
 - `/supabase` should remain a TUI slash command. It can open a dialog through the public TUI plugin API; see `packages/plugin/src/tui.ts:389`.
 - The plugin can use the built-in provider OAuth endpoints through `client.provider.oauth.authorize()` and `client.provider.oauth.callback()`; see `packages/opencode/src/cli/cmd/tui/component/dialog-provider.tsx:83` and `packages/opencode/src/cli/cmd/tui/component/dialog-provider.tsx:145`.
@@ -111,7 +112,9 @@ Execute this plan in phases. Do not start a later phase until the current phase 
 
 ### Cross-phase constraints
 
-- Primary install story for this phase is manual local-path plugin configuration from a consumer repo via `.opencode/opencode.jsonc` and `.opencode/tui.jsonc`.
+- Primary install story for this phase is `opencode plugin ../../opencode-supabase` from a consumer repo on OpenCode `>= 1.3.4`.
+- Manual local-path configuration through `.opencode/opencode.jsonc` and `.opencode/tui.jsonc` is the fallback path when CLI install is not desired.
+- Manual verification for this phase requires an OpenCode host version with `opencode plugin` and TUI plugin support in `tui.jsonc` (`>= 1.3.4`).
 - The package must remain one npm package with separate `./server` and `./tui` entrypoints.
 - Keep provider id exactly `supabase`.
 - Do not rely on a `client_secret`; the target OAuth flow is public PKCE with `client_id` only.
@@ -130,7 +133,8 @@ Execute this plan in phases. Do not start a later phase until the current phase 
 
 **Deliverable:**
 
-- manual local-path installation from a consumer repo works
+- CLI installation from a consumer repo works
+- manual local-path configuration works as a fallback
 - both plugin targets load
 - `/supabase` exists and opens a dialog shell
 - dialog open and close behavior works cleanly
@@ -139,16 +143,17 @@ Execute this plan in phases. Do not start a later phase until the current phase 
 
 1. `bun install`
 2. `bun run typecheck`
-3. In a separate consumer repo, add `../opencode-supabase` to `.opencode/opencode.jsonc`
-4. In the same consumer repo, add `../opencode-supabase` to `.opencode/tui.jsonc`
-5. Start OpenCode from the consumer repo
-6. Run `/supabase`
-7. Confirm the dialog opens and closes without loader or runtime errors
-8. Confirm both config surfaces were respected by the host
+3. In a separate consumer repo on OpenCode `>= 1.3.4`, run `opencode plugin ../../opencode-supabase`
+4. Start OpenCode from the consumer repo
+5. Run `/supabase`
+6. Confirm the dialog opens and closes without loader or runtime errors
+7. Confirm both config surfaces were patched by the CLI install
+8. Optional fallback verification: configure `../../opencode-supabase` manually in `.opencode/opencode.jsonc` and `.opencode/tui.jsonc`
+9. Confirm the same plugin loads through manual config too
 
 **Exit criteria:**
 
-- dual-target package resolution works from config
+- dual-target package resolution works through CLI install
 - both config surfaces load the plugin correctly
 - `/supabase` is visible and interactive
 
@@ -175,7 +180,7 @@ Execute this plan in phases. Do not start a later phase until the current phase 
 **Manual verification:**
 
 1. `bun run typecheck`
-2. Configure the plugin from a consumer repo using local path entries in `.opencode/opencode.jsonc` and `.opencode/tui.jsonc`
+2. Install the plugin from a consumer repo using `opencode plugin ../../opencode-supabase`
 3. Start OpenCode
 4. Run `/supabase`
 5. Confirm the plugin attempts to open the browser
@@ -286,7 +291,7 @@ Execute this plan in phases. Do not start a later phase until the current phase 
 ## Recommended execution order
 
 1. Task 1: Scaffold the dual-target package
-2. Task 2: Make manual local-path installation work across both config surfaces
+2. Task 2: Make CLI install work with manual config as a fallback
 3. Task 3: Recreate `/supabase` as a dialog shell
 4. Task 4: Split shared OAuth, API, and config code
 5. Task 5: Add plugin-owned auth persistence
@@ -362,41 +367,49 @@ export default { id: "supabase", tui };
 - `bun install`
 - `bun run typecheck`
 
-## Task 2: Make manual local-path installation work across both config surfaces
+## Task 2: Make CLI install work with manual config as a fallback
 
 **Files:**
 
 - Modify: `package.json`
 - Modify: `README.md`
+- Reference: `packages/opencode/src/plugin/install.ts:145`
+- Reference: `packages/opencode/src/plugin/install.ts:421`
+- Reference: `packages/opencode/test/plugin/install.test.ts:112`
 - Reference: `packages/opencode/src/config/config.ts:286`
 - Reference: `packages/opencode/src/config/tui.ts:57`
-- Reference: `packages/opencode/test/config/tui.test.ts:611`
-- Reference: `packages/opencode/test/cli/tui/plugin-loader-entrypoint.test.ts:48`
 
 **Steps**
 
 1. Keep the published package name stable as `opencode-supabase`.
-2. Ensure the package manifest exposes both plugin targets so config-based loading can resolve both.
-3. Document the primary install path as manual local-path configuration from a consumer repo.
-4. Document that the same plugin spec must be added to both `.opencode/opencode.jsonc` and `.opencode/tui.jsonc`.
-5. Use a consumer-repo-relative example path such as:
+2. Ensure the package manifest exposes both plugin targets so CLI install and config-based loading can resolve both.
+3. Document the primary install path as:
+
+```bash
+opencode plugin ../../opencode-supabase
+```
+
+4. Document manual local-path configuration as the fallback path.
+5. Document that the same plugin spec must be added to both `.opencode/opencode.jsonc` and `.opencode/tui.jsonc` for the fallback flow.
+6. Use a consumer-repo-relative example path such as:
 
 ```json
 {
-  "plugin": ["../opencode-supabase"]
+  "plugin": ["../../opencode-supabase"]
 }
 ```
 
-6. Explain that server and TUI load from separate config surfaces, so both files must be configured.
-7. Do not document manual `opencode.jsonc`-only install as sufficient for the full Phase 1 flow.
-8. Do not mention any CLI install command as a current install path.
+7. Explain that this manual path is resolved relative to the `.opencode/` directory, not the consumer repo root, so a sibling checkout usually needs `../../opencode-supabase`.
+8. Explain that server and TUI load from separate config surfaces, so both files must be configured for the manual fallback.
+9. Do not document manual `opencode.jsonc`-only install as sufficient for the full Phase 1 flow.
 
 **Verification**
 
 - `bun run typecheck`
-- from a consumer repo, add the plugin path to both config surfaces
-- start OpenCode from the consumer repo
-- confirm both targets load
+- run `opencode plugin ../../opencode-supabase` from a consumer repo on OpenCode `>= 1.3.4`
+- confirm both config surfaces were patched
+- start OpenCode from the consumer repo and confirm both targets load
+- optional fallback: add the plugin path to both config surfaces manually and confirm the same result
 
 ## Task 3: Recreate `/supabase` as a dialog shell
 
@@ -648,15 +661,19 @@ auth: {
 
 2. Show the primary install path as:
 
+```bash
+opencode plugin ../../opencode-supabase
+```
+
+3. Show the optional manual install fallback as:
+
 ```json
 {
-  "plugin": ["../opencode-supabase"]
+  "plugin": ["../../opencode-supabase"]
 }
 ```
 
-3. Show the local development install path as:
-
-Add the same local path entry to both `.opencode/opencode.jsonc` and `.opencode/tui.jsonc` in a consumer repo.
+and state that the same local path entry must be added to both `.opencode/opencode.jsonc` and `.opencode/tui.jsonc` in a consumer repo.
 
 4. Document required config in this priority order:
 
