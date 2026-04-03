@@ -1,12 +1,27 @@
 {
   "name": "opencode-supabase",
-  "module": "index.ts",
+  "version": "0.0.0",
   "type": "module",
   "private": true,
-  "devDependencies": {
-    "@types/bun": "latest"
+  "exports": {
+    "./server": "./src/server/index.ts",
+    "./tui": "./src/tui/index.tsx"
   },
-  "peerDependencies": {
+  "scripts": {
+    "typecheck": "bunx tsc --noEmit",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@opencode-ai/plugin": "latest",
+    "@opencode-ai/sdk": "latest",
+    "open": "latest",
+    "zod": "latest"
+  },
+  "devDependencies": {
+    "@opentui/core": "latest",
+    "@opentui/solid": "latest",
+    "@types/bun": "latest",
+    "@types/node": "latest",
     "typescript": "^5"
   }
 }
