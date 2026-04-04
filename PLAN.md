@@ -191,6 +191,10 @@ Execute this plan in phases. Do not start a later phase until the current phase 
 10. Restart OpenCode
 11. Confirm `/supabase` no longer behaves like a first-run disconnected shell
 
+**Implementation note:**
+
+- Do not treat the public-client PKCE token exchange as fully validated for Supabase OAuth Apps yet. Task 4 extracted shared helpers around that target contract, but Task 6 and Task 7 must confirm the real supported token endpoint and client authentication requirements before finalizing the live OAuth flow.
+
 **Exit criteria:**
 
 - happy-path OAuth works end-to-end
@@ -463,6 +467,12 @@ opencode plugin ../../opencode-supabase
 5. Validate the exact Supabase authorize and token exchange requirements for a public client before implementing the final request payloads.
 6. Keep shared API endpoints as constants in shared code.
 7. Fail fast if required `client_id` or port configuration is missing.
+
+**Task 4 note:**
+
+- Shared helpers should stay aligned with the public PKCE target contract for now, but this task does not prove that Supabase OAuth Apps can complete secretless token exchange on `https://api.supabase.com/v1/oauth/token`.
+- Current Supabase OAuth App integration docs still show secret-based exchange on the `api.supabase.com/v1/oauth/*` endpoints, while separate Supabase OAuth server docs document public PKCE clients without `client_secret` on `https://<project-ref>.supabase.co/auth/v1/oauth/*`.
+- Before Task 6 or Task 7 implements the real end-to-end login flow, confirm which endpoint family and client authentication mode Supabase OAuth Apps actually support for this plugin.
 
 **Verification**
 
