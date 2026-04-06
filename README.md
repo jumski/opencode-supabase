@@ -72,6 +72,12 @@ Run typecheck:
 bun run typecheck
 ```
 
+## Reference Docs
+
+For the Supabase Management API reference, see:
+
+- https://supabase.com/docs/reference/api/introduction
+
 ## Supabase OAuth Broker
 
 The broker is a single Supabase Edge Function that handles confidential token operations against `https://api.supabase.com/v1/oauth/token`. It exposes two endpoints:
