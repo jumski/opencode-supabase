@@ -1,7 +1,11 @@
 import type { PluginInput, PluginOptions } from "@opencode-ai/plugin";
 import { createConnection } from "node:net";
 
-import { exchangeCodeForTokens } from "../shared/api.ts";
+import {
+  BrokerClientError,
+  exchangeCodeThroughBroker,
+  type BrokerConfig,
+} from "../shared/broker.ts";
 import { readSupabaseConfig } from "../shared/cfg.ts";
 import { buildAuthorizeUrl, generatePKCE, generateState } from "../shared/oauth.ts";
 import type { FetchLike, SupabaseTokenResponse } from "../shared/types.ts";
@@ -83,9 +87,13 @@ async function ensureServer(
     throw new Error(`Supabase callback port ${port} is already in use`);
   }
 
+  const brokerConfig: BrokerConfig = {
+    baseUrl: config.brokerBaseUrl,
+  };
+
   server = Bun.serve({
     port,
-    fetch(req) {
+    async fetch(req) {
       const url = new URL(req.url);
       if (url.pathname !== CALLBACK_PATH) {
         return new Response("Not found", { status: 404 });
@@ -132,31 +140,41 @@ async function ensureServer(
       clearTimeout(pending.timeout);
       pendingAuths.delete(state);
 
-      void exchangeCodeForTokens(
-        config,
-        {
-          code,
-          redirectUri: pending.redirectUri,
-          codeVerifier: pending.codeVerifier,
-        },
-        deps.fetch,
-      )
-        .then(async (tokens) => {
-          const expires = Date.now() + (tokens.expires_in ?? 3600) * 1000;
-          await writeSavedAuth(input, {
-            access: tokens.access_token,
-            refresh: tokens.refresh_token,
-            expires,
-          });
-          pending.resolve({ tokens, expires });
-        })
-        .catch((cause) => {
-          pending.reject(cause instanceof Error ? cause : new Error(String(cause)));
+      try {
+        const tokens = await exchangeCodeThroughBroker(
+          brokerConfig,
+          {
+            code,
+            redirect_uri: pending.redirectUri,
+            code_verifier: pending.codeVerifier,
+          },
+          deps.fetch,
+        );
+
+        const expires = Date.now() + (tokens.expires_in || 3600) * 1000;
+        await writeSavedAuth(input, {
+          access: tokens.access_token,
+          refresh: tokens.refresh_token,
+          expires,
         });
 
-      return new Response(HTML_SUCCESS, {
-        headers: { "Content-Type": "text/html" },
-      });
+        pending.resolve({ tokens, expires });
+
+        return new Response(HTML_SUCCESS, {
+          headers: { "Content-Type": "text/html" },
+        });
+      } catch (cause) {
+        const errorMessage = cause instanceof BrokerClientError
+          ? `Authorization failed: ${cause.message}`
+          : "Authorization failed";
+
+        pending.reject(cause instanceof Error ? cause : new Error(String(cause)));
+
+        return new Response(htmlError(errorMessage), {
+          status: cause instanceof BrokerClientError && cause.status >= 500 ? 502 : 400,
+          headers: { "Content-Type": "text/html" },
+        });
+      }
     },
   });
 

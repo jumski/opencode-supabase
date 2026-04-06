@@ -31,9 +31,19 @@ describe("server auth hook", () => {
       {
         clientId: "plugin-client",
         oauthPort: 17654,
+        brokerBaseUrl: "https://example.com/broker",
       },
       {
-        fetch: mock(async () => new Response(JSON.stringify({ access_token: "a", refresh_token: "r" }))) as never,
+        fetch: mock(async () =>
+          new Response(
+            JSON.stringify({
+              access_token: "a",
+              refresh_token: "r",
+              expires_in: 3600,
+              token_type: "bearer",
+            }),
+          ),
+        ) as never,
       },
     );
 
@@ -58,9 +68,19 @@ describe("server auth hook", () => {
       {
         clientId: "plugin-client",
         oauthPort: 17655,
+        brokerBaseUrl: "https://example.com/broker",
       },
       {
-        fetch: mock(async () => new Response(JSON.stringify({ access_token: "a", refresh_token: "r" }))) as never,
+        fetch: mock(async () =>
+          new Response(
+            JSON.stringify({
+              access_token: "a",
+              refresh_token: "r",
+              expires_in: 3600,
+              token_type: "bearer",
+            }),
+          ),
+        ) as never,
       },
     );
 
@@ -75,19 +95,28 @@ describe("server auth hook", () => {
     expect(html).toContain("Missing required state parameter");
   });
 
-  test("exchanges the callback code, persists plugin-owned auth, and returns host oauth fields", async () => {
+  test("exchanges the callback code via broker, persists plugin-owned auth, and returns host oauth fields", async () => {
     const input = await createInput();
-    const fetchMock = mock(async (_url: string, init?: RequestInit) => {
-      const body = new URLSearchParams(String(init?.body));
-      expect(body.get("grant_type")).toBe("authorization_code");
-      expect(body.get("client_id")).toBe("plugin-client");
-      expect(body.get("code")).toBe("code-123");
+    const fetchMock = mock(async (url: string, init?: RequestInit) => {
+      // Verify it's calling the broker /exchange endpoint
+      expect(url).toBe("https://example.com/broker/exchange");
+      expect(init?.method).toBe("POST");
+      expect(init?.headers).toMatchObject({
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      });
+
+      const body = JSON.parse(String(init?.body));
+      expect(body.code).toBe("code-123");
+      expect(body.code_verifier).toBeTruthy();
+      expect(body.redirect_uri).toBe("http://127.0.0.1:17656/auth/callback");
 
       return new Response(
         JSON.stringify({
           access_token: "access-123",
           refresh_token: "refresh-123",
           expires_in: 1800,
+          token_type: "bearer",
         }),
         {
           status: 200,
@@ -101,6 +130,7 @@ describe("server auth hook", () => {
       {
         clientId: "plugin-client",
         oauthPort: 17656,
+        brokerBaseUrl: "https://example.com/broker",
       },
       { fetch: fetchMock as unknown as FetchLike },
     );

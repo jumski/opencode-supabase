@@ -1,16 +1,16 @@
 import { describe, expect, mock, test } from "bun:test";
 
 import {
-  DEFAULT_SUPABASE_API_BASE_URL,
-  DEFAULT_SUPABASE_OAUTH_AUTHORIZE_URL,
-  DEFAULT_SUPABASE_OAUTH_TOKEN_URL,
-  exchangeCodeForTokens,
-  parseTokenResponse,
-  refreshAccessToken,
-} from "../src/shared/api.ts";
+  BrokerClientError,
+  exchangeCodeThroughBroker,
+  refreshTokenThroughBroker,
+} from "../src/shared/broker.ts";
+import { DEFAULT_SUPABASE_API_BASE_URL, DEFAULT_SUPABASE_OAUTH_AUTHORIZE_URL } from "../src/shared/api.ts";
 import { readSupabaseConfig } from "../src/shared/cfg.ts";
 import { buildAuthorizeUrl } from "../src/shared/oauth.ts";
 import type { FetchLike } from "../src/shared/types.ts";
+
+const DEFAULT_BROKER_BASE_URL = "https://opencode-supabase.supabase.co/functions/v1/opencode-supabase-broker";
 
 describe("shared config", () => {
   test("reads required values from plugin options and falls back to default endpoints", () => {
@@ -26,7 +26,7 @@ describe("shared config", () => {
       clientId: "plugin-client",
       oauthPort: 1456,
       authorizeUrl: DEFAULT_SUPABASE_OAUTH_AUTHORIZE_URL,
-      tokenUrl: DEFAULT_SUPABASE_OAUTH_TOKEN_URL,
+      brokerBaseUrl: DEFAULT_BROKER_BASE_URL,
       apiBaseUrl: DEFAULT_SUPABASE_API_BASE_URL,
     });
   });
@@ -36,7 +36,7 @@ describe("shared config", () => {
       OPENCODE_SUPABASE_OAUTH_CLIENT_ID: "env-client",
       OPENCODE_SUPABASE_OAUTH_PORT: "4567",
       SUPABASE_OAUTH_AUTHORIZE_URL: "https://example.com/authorize",
-      SUPABASE_OAUTH_TOKEN_URL: "https://example.com/token",
+      OPENCODE_SUPABASE_BROKER_URL: "https://example.com/broker",
       SUPABASE_API_BASE_URL: "https://example.com/api",
     });
 
@@ -44,7 +44,7 @@ describe("shared config", () => {
       clientId: "env-client",
       oauthPort: 4567,
       authorizeUrl: "https://example.com/authorize",
-      tokenUrl: "https://example.com/token",
+      brokerBaseUrl: "https://example.com/broker",
       apiBaseUrl: "https://example.com/api",
     });
   });
@@ -97,50 +97,27 @@ describe("shared oauth", () => {
   });
 });
 
-describe("shared api", () => {
-  test("parses token responses and keeps optional fields", () => {
-    expect(
-      parseTokenResponse({
-        access_token: "access",
-        refresh_token: "refresh",
-        token_type: "bearer",
-        expires_in: 3600,
-      }),
-    ).toEqual({
-      access_token: "access",
-      refresh_token: "refresh",
-      token_type: "bearer",
-      expires_in: 3600,
-    });
-  });
-
-  test("rejects invalid token responses", () => {
-    expect(() => parseTokenResponse({ refresh_token: "refresh" })).toThrow(
-      "Invalid token response: missing access_token",
-    );
-  });
-
-  test("exchanges codes with a public PKCE request payload", async () => {
+describe("broker client", () => {
+  test("exchanges codes via broker POST /exchange", async () => {
     const fetchMock = mock(async (url: string, init?: RequestInit) => {
-      expect(url).toBe("https://example.com/oauth/token");
+      expect(url).toBe("https://example.com/broker/exchange");
       expect(init?.method).toBe("POST");
       expect(init?.headers).toEqual({
-        "Content-Type": "application/x-www-form-urlencoded",
+        "Content-Type": "application/json",
         Accept: "application/json",
       });
 
-      const body = new URLSearchParams(String(init?.body));
-      expect(body.get("grant_type")).toBe("authorization_code");
-      expect(body.get("client_id")).toBe("plugin-client");
-      expect(body.get("code")).toBe("code-123");
-      expect(body.get("redirect_uri")).toBe("http://127.0.0.1:1456/callback");
-      expect(body.get("code_verifier")).toBe("verifier-123");
+      const body = JSON.parse(String(init?.body));
+      expect(body.code).toBe("code-123");
+      expect(body.code_verifier).toBe("verifier-123");
+      expect(body.redirect_uri).toBe("http://127.0.0.1:1456/callback");
 
       return new Response(
         JSON.stringify({
           access_token: "access",
           refresh_token: "refresh",
           expires_in: 3600,
+          token_type: "bearer",
         }),
         {
           status: 200,
@@ -149,36 +126,37 @@ describe("shared api", () => {
       );
     });
 
-    const tokens = await exchangeCodeForTokens(
-      {
-        clientId: "plugin-client",
-        tokenUrl: "https://example.com/oauth/token",
-      },
+    const tokens = await exchangeCodeThroughBroker(
+      { baseUrl: "https://example.com/broker" },
       {
         code: "code-123",
-        redirectUri: "http://127.0.0.1:1456/callback",
-        codeVerifier: "verifier-123",
+        code_verifier: "verifier-123",
+        redirect_uri: "http://127.0.0.1:1456/callback",
       },
       fetchMock as unknown as FetchLike,
     );
 
     expect(tokens.access_token).toBe("access");
     expect(tokens.refresh_token).toBe("refresh");
+    expect(tokens.expires_in).toBe(3600);
+    expect(tokens.token_type).toBe("bearer");
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  test("refreshes tokens with client_id and no client_secret", async () => {
-    const fetchMock = mock(async (_url: string, init?: RequestInit) => {
-      const body = new URLSearchParams(String(init?.body));
-      expect(body.get("grant_type")).toBe("refresh_token");
-      expect(body.get("client_id")).toBe("plugin-client");
-      expect(body.get("refresh_token")).toBe("refresh-123");
-      expect(String(init?.headers)).not.toContain("Authorization");
+  test("refreshes tokens via broker POST /refresh", async () => {
+    const fetchMock = mock(async (url: string, init?: RequestInit) => {
+      expect(url).toBe("https://example.com/broker/refresh");
+      expect(init?.method).toBe("POST");
+
+      const body = JSON.parse(String(init?.body));
+      expect(body.refresh_token).toBe("refresh-123");
 
       return new Response(
         JSON.stringify({
           access_token: "next-access",
           refresh_token: "next-refresh",
+          expires_in: 3600,
+          token_type: "bearer",
         }),
         {
           status: 200,
@@ -187,22 +165,86 @@ describe("shared api", () => {
       );
     });
 
-    const tokens = await refreshAccessToken(
-      {
-        clientId: "plugin-client",
-        tokenUrl: "https://example.com/oauth/token",
-      },
-      "refresh-123",
+    const tokens = await refreshTokenThroughBroker(
+      { baseUrl: "https://example.com/broker" },
+      { refresh_token: "refresh-123" },
       fetchMock as unknown as FetchLike,
     );
 
-    expect(tokens).toEqual({
-      access_token: "next-access",
-      refresh_token: "next-refresh",
-      expires_in: undefined,
-      token_type: undefined,
-      id_token: undefined,
-      scope: undefined,
+    expect(tokens.access_token).toBe("next-access");
+    expect(tokens.refresh_token).toBe("next-refresh");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  test("throws BrokerClientError on broker error response", async () => {
+    const fetchMock = mock(async () => {
+      return new Response(
+        JSON.stringify({
+          error: {
+            code: "invalid_request",
+            message: "redirect_uri not allowed",
+          },
+        }),
+        {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        },
+      );
     });
+
+    await expect(
+      exchangeCodeThroughBroker(
+        { baseUrl: "https://example.com/broker" },
+        {
+          code: "code-123",
+          code_verifier: "verifier-123",
+          redirect_uri: "http://evil.com/callback",
+        },
+        fetchMock as unknown as FetchLike,
+      ),
+    ).rejects.toThrow(BrokerClientError);
+
+    try {
+      await exchangeCodeThroughBroker(
+        { baseUrl: "https://example.com/broker" },
+        {
+          code: "code-123",
+          code_verifier: "verifier-123",
+          redirect_uri: "http://evil.com/callback",
+        },
+        fetchMock as unknown as FetchLike,
+      );
+    } catch (error) {
+      expect(error).toBeInstanceOf(BrokerClientError);
+      expect((error as BrokerClientError).code).toBe("invalid_request");
+      expect((error as BrokerClientError).status).toBe(400);
+    }
+  });
+
+  test("throws on invalid token response from broker", async () => {
+    const fetchMock = mock(async () => {
+      return new Response(
+        JSON.stringify({
+          access_token: "access",
+          // missing refresh_token
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        },
+      );
+    });
+
+    await expect(
+      exchangeCodeThroughBroker(
+        { baseUrl: "https://example.com/broker" },
+        {
+          code: "code-123",
+          code_verifier: "verifier-123",
+          redirect_uri: "http://127.0.0.1:1456/callback",
+        },
+        fetchMock as unknown as FetchLike,
+      ),
+    ).rejects.toThrow(BrokerClientError);
   });
 });

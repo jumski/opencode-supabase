@@ -30,6 +30,7 @@ test("tui plugin registers /supabase and opens a closable dialog", async () => {
   let commandsFactory: (() => Array<Record<string, unknown>>) | undefined;
   let replaceFactory: (() => unknown) | undefined;
   let cleared = 0;
+  let lastDialogState: string | undefined;
 
   await tuiModule.tui(
     {
@@ -40,13 +41,29 @@ test("tui plugin registers /supabase and opens a closable dialog", async () => {
         },
       },
       ui: {
-        DialogAlert: (input: unknown) => input,
+        DialogAlert: (input: { title?: string; message?: string }) => {
+          lastDialogState = "alert";
+          return input;
+        },
+        DialogConfirm: (input: { title?: string; message?: string }) => {
+          lastDialogState = "confirm";
+          return input;
+        },
         dialog: {
           replace: (factory: () => unknown) => {
             replaceFactory = factory;
           },
           clear: () => {
             cleared += 1;
+          },
+        },
+        toast: () => {},
+      },
+      client: {
+        provider: {
+          oauth: {
+            authorize: () => Promise.resolve({ data: { url: "https://example.com/auth", instructions: "Test", method: "auto" } }),
+            callback: () => Promise.resolve({ data: { type: "success" } }),
           },
         },
       },
@@ -66,9 +83,14 @@ test("tui plugin registers /supabase and opens a closable dialog", async () => {
   command?.onSelect?.();
   expect(typeof replaceFactory).toBe("function");
 
-  const dialog = replaceFactory?.() as { title?: string; onConfirm?: () => void } | undefined;
+  // The dialog starts in "idle" state and shows DialogConfirm
+  const dialog = replaceFactory?.() as { title?: string; message?: string; onConfirm?: () => void; onCancel?: () => void } | undefined;
   expect(dialog?.title).toBe("Connect Supabase");
+  expect(lastDialogState).toBe("confirm");
+  expect(typeof dialog?.onConfirm).toBe("function");
+  expect(typeof dialog?.onCancel).toBe("function");
 
-  dialog?.onConfirm?.();
+  // Cancel should clear the dialog immediately
+  dialog?.onCancel?.();
   expect(cleared).toBe(1);
 });

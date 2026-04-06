@@ -3,9 +3,10 @@ import type { PluginOptions } from "@opencode-ai/plugin";
 import {
   DEFAULT_SUPABASE_API_BASE_URL,
   DEFAULT_SUPABASE_OAUTH_AUTHORIZE_URL,
-  DEFAULT_SUPABASE_OAUTH_TOKEN_URL,
 } from "./api.ts";
 import type { SupabaseEnv, SupabaseSharedConfig } from "./types.ts";
+
+const DEFAULT_BROKER_BASE_URL = "https://opencode-supabase.supabase.co/functions/v1/opencode-supabase-broker";
 
 function readStringOption(options: PluginOptions | undefined, key: string) {
   const value = options?.[key];
@@ -58,8 +59,10 @@ export function readSupabaseConfig(
       readStringOption(options, "authorizeUrl") ??
       env.SUPABASE_OAUTH_AUTHORIZE_URL ??
       DEFAULT_SUPABASE_OAUTH_AUTHORIZE_URL,
-    tokenUrl:
-      readStringOption(options, "tokenUrl") ?? env.SUPABASE_OAUTH_TOKEN_URL ?? DEFAULT_SUPABASE_OAUTH_TOKEN_URL,
+    brokerBaseUrl:
+      readStringOption(options, "brokerBaseUrl") ??
+      env.OPENCODE_SUPABASE_BROKER_URL ??
+      DEFAULT_BROKER_BASE_URL,
     apiBaseUrl:
       readStringOption(options, "apiBaseUrl") ?? env.SUPABASE_API_BASE_URL ?? DEFAULT_SUPABASE_API_BASE_URL,
   };

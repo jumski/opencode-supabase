@@ -8,7 +8,7 @@ export type SupabaseSharedConfig = {
   clientId: string;
   oauthPort: number;
   authorizeUrl: string;
-  tokenUrl: string;
+  brokerBaseUrl: string;
   apiBaseUrl: string;
 };
 
