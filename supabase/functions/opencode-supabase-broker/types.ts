@@ -29,12 +29,13 @@ export type BrokerErrorCode =
   | "invalid_request"
   | "unauthorized"
   | "rate_limited"
-  | "upstream_error";
+  | "upstream_error"
+  | "server_error";
 
 export type BrokerError = {
   code: BrokerErrorCode;
   message: string;
-  status: 400 | 401 | 429 | 502;
+  status: 400 | 401 | 429 | 500 | 502;
 };
 
 export type BrokerErrorBody = {
@@ -43,3 +44,17 @@ export type BrokerErrorBody = {
     message: string;
   };
 };
+
+export class BrokerConfigError extends Error {
+  readonly #detail: string;
+
+  constructor(detail: string) {
+    super(detail);
+    this.name = "BrokerConfigError";
+    this.#detail = detail;
+  }
+
+  get detail(): string {
+    return this.#detail;
+  }
+}

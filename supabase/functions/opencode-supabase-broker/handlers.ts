@@ -8,7 +8,7 @@ import {
   requireNoExtraFields,
   requireNonEmptyString,
 } from "./http.ts";
-import { exchangeAuthorizationCode } from "./supabase.ts";
+import { exchangeAuthorizationCode, refreshAccessToken } from "./supabase.ts";
 import type { BrokerConfig, BrokerFetch, ExchangeRequest, RefreshRequest } from "./types.ts";
 
 function validateRedirectUri(config: BrokerConfig, redirectUri: string): string {
@@ -79,11 +79,16 @@ function parseRefreshRequest(body: Record<string, unknown>): RefreshRequest {
   };
 }
 
-export async function handleRefreshRequest(request: Request): Promise<Response> {
+export async function handleRefreshRequest(
+  request: Request,
+  config: BrokerConfig,
+  fetchImpl: BrokerFetch,
+): Promise<Response> {
   try {
     requireMethod(request, "POST");
-    parseRefreshRequest(await parseJsonObject(request));
-    return errorResponse(createBrokerError(400, "invalid_request", "refresh not implemented yet"));
+    const { refresh_token } = parseRefreshRequest(await parseJsonObject(request));
+    const tokens = await refreshAccessToken(config, refresh_token, fetchImpl);
+    return jsonResponse(tokens);
   } catch (error) {
     if (isBrokerError(error)) {
       return errorResponse(error);

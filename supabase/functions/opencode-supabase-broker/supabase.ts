@@ -82,3 +82,40 @@ export async function exchangeAuthorizationCode(
 
   return normalizeTokenResponse(payload);
 }
+
+export async function refreshAccessToken(
+  config: BrokerConfig,
+  refreshToken: string,
+  fetchImpl: BrokerFetch,
+): Promise<TokenResponse> {
+  let response: Response;
+
+  try {
+    response = await fetchImpl(config.tokenUrl, {
+      method: "POST",
+      headers: {
+        Authorization: buildBasicAuthHeader(config.clientId, config.clientSecret),
+        "Content-Type": "application/x-www-form-urlencoded",
+        Accept: "application/json",
+      },
+      body: new URLSearchParams({
+        grant_type: "refresh_token",
+        refresh_token: refreshToken,
+      }),
+    });
+  } catch {
+    throw createBrokerError(502, "upstream_error", "upstream token request failed");
+  }
+
+  const payload = await readUpstreamBody(response);
+
+  if (!response.ok) {
+    throw createBrokerError(
+      response.status === 400 || response.status === 401 ? 401 : 502,
+      response.status === 400 || response.status === 401 ? "unauthorized" : "upstream_error",
+      response.status === 400 || response.status === 401 ? "upstream token request was rejected" : "upstream token request failed",
+    );
+  }
+
+  return normalizeTokenResponse(payload);
+}
