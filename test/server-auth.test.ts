@@ -8,6 +8,7 @@ import { readSavedAuth } from "../src/server/store.ts";
 import type { FetchLike } from "../src/shared/types.ts";
 
 const cleanupPaths: string[] = [];
+const originalBrokerUrl = process.env.OPENCODE_SUPABASE_BROKER_URL;
 
 async function createInput() {
   const root = await mkdtemp(join(tmpdir(), "opencode-supabase-auth-"));
@@ -21,17 +22,22 @@ async function createInput() {
 afterEach(async () => {
   await stopSupabaseAuthServer();
   await Promise.all(cleanupPaths.splice(0).map((path) => rm(path, { force: true, recursive: true })));
+  if (originalBrokerUrl === undefined) {
+    delete process.env.OPENCODE_SUPABASE_BROKER_URL;
+  } else {
+    process.env.OPENCODE_SUPABASE_BROKER_URL = originalBrokerUrl;
+  }
 });
 
 describe("server auth hook", () => {
   test("builds an auto oauth authorize result using the plugin callback server", async () => {
     const input = await createInput();
+    process.env.OPENCODE_SUPABASE_BROKER_URL = "https://example.com/broker";
     const auth = createSupabaseAuth(
       input as never,
       {
         clientId: "plugin-client",
         oauthPort: 17654,
-        brokerBaseUrl: "https://example.com/broker",
       },
       {
         fetch: mock(async () =>
@@ -63,12 +69,12 @@ describe("server auth hook", () => {
 
   test("rejects callback requests with missing state", async () => {
     const input = await createInput();
+    process.env.OPENCODE_SUPABASE_BROKER_URL = "https://example.com/broker";
     const auth = createSupabaseAuth(
       input as never,
       {
         clientId: "plugin-client",
         oauthPort: 17655,
-        brokerBaseUrl: "https://example.com/broker",
       },
       {
         fetch: mock(async () =>
@@ -97,6 +103,7 @@ describe("server auth hook", () => {
 
   test("exchanges the callback code via broker, persists plugin-owned auth, and returns host oauth fields", async () => {
     const input = await createInput();
+    process.env.OPENCODE_SUPABASE_BROKER_URL = "https://example.com/broker";
     const fetchMock = mock(async (url: string, init?: RequestInit) => {
       // Verify it's calling the broker /exchange endpoint
       expect(url).toBe("https://example.com/broker/exchange");
@@ -130,7 +137,6 @@ describe("server auth hook", () => {
       {
         clientId: "plugin-client",
         oauthPort: 17656,
-        brokerBaseUrl: "https://example.com/broker",
       },
       { fetch: fetchMock as unknown as FetchLike },
     );

@@ -10,25 +10,40 @@ import { readSupabaseConfig } from "../src/shared/cfg.ts";
 import { buildAuthorizeUrl } from "../src/shared/oauth.ts";
 import type { FetchLike } from "../src/shared/types.ts";
 
-const DEFAULT_BROKER_BASE_URL = "https://opencode-supabase.supabase.co/functions/v1/opencode-supabase-broker";
-
 describe("shared config", () => {
-  test("reads required values from plugin options and falls back to default endpoints", () => {
+  test("reads broker base url from env while keeping plugin options for other fields", () => {
     const config = readSupabaseConfig(
       {
         clientId: "plugin-client",
         oauthPort: 1456,
       },
-      {},
+      {
+        OPENCODE_SUPABASE_BROKER_URL: "https://example.com/env-broker",
+      },
     );
 
     expect(config).toEqual({
       clientId: "plugin-client",
       oauthPort: 1456,
       authorizeUrl: DEFAULT_SUPABASE_OAUTH_AUTHORIZE_URL,
-      brokerBaseUrl: DEFAULT_BROKER_BASE_URL,
+      brokerBaseUrl: "https://example.com/env-broker",
       apiBaseUrl: DEFAULT_SUPABASE_API_BASE_URL,
     });
+  });
+
+  test("ignores brokerBaseUrl in plugin options", () => {
+    const config = readSupabaseConfig(
+      {
+        clientId: "plugin-client",
+        oauthPort: 1456,
+        brokerBaseUrl: "https://example.com/plugin-broker",
+      },
+      {
+        OPENCODE_SUPABASE_BROKER_URL: "https://example.com/env-broker",
+      },
+    );
+
+    expect(config.brokerBaseUrl).toBe("https://example.com/env-broker");
   });
 
   test("reads values from env when plugin options are absent", () => {
@@ -58,6 +73,18 @@ describe("shared config", () => {
         {},
       ),
     ).toThrow("Missing required Supabase config: clientId");
+  });
+
+  test("fails fast when broker base url is missing", () => {
+    expect(() =>
+      readSupabaseConfig(
+        {
+          clientId: "plugin-client",
+          oauthPort: 1456,
+        },
+        {},
+      ),
+    ).toThrow("Missing required Supabase config: brokerBaseUrl");
   });
 
   test("fails fast when oauth port is missing or invalid", () => {

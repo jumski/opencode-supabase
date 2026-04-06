@@ -6,8 +6,6 @@ import {
 } from "./api.ts";
 import type { SupabaseEnv, SupabaseSharedConfig } from "./types.ts";
 
-const DEFAULT_BROKER_BASE_URL = "https://opencode-supabase.supabase.co/functions/v1/opencode-supabase-broker";
-
 function readStringOption(options: PluginOptions | undefined, key: string) {
   const value = options?.[key];
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
@@ -51,6 +49,7 @@ export function readSupabaseConfig(
   const oauthPort = requirePort(
     readPortOption(options, "oauthPort") ?? env.OPENCODE_SUPABASE_OAUTH_PORT,
   );
+  const brokerBaseUrl = requireString(env.OPENCODE_SUPABASE_BROKER_URL, "brokerBaseUrl");
 
   return {
     clientId,
@@ -59,10 +58,7 @@ export function readSupabaseConfig(
       readStringOption(options, "authorizeUrl") ??
       env.SUPABASE_OAUTH_AUTHORIZE_URL ??
       DEFAULT_SUPABASE_OAUTH_AUTHORIZE_URL,
-    brokerBaseUrl:
-      readStringOption(options, "brokerBaseUrl") ??
-      env.OPENCODE_SUPABASE_BROKER_URL ??
-      DEFAULT_BROKER_BASE_URL,
+    brokerBaseUrl,
     apiBaseUrl:
       readStringOption(options, "apiBaseUrl") ?? env.SUPABASE_API_BASE_URL ?? DEFAULT_SUPABASE_API_BASE_URL,
   };

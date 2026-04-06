@@ -57,6 +57,13 @@ The plugin owns browser authorization, PKCE, the local callback server, and loca
 
 ### Local development
 
+The plugin inherits environment variables from the OpenCode CLI process. For local broker development, point the plugin at your local function URL before launching OpenCode:
+
+```bash
+export OPENCODE_SUPABASE_BROKER_URL=http://127.0.0.1:54321/functions/v1/opencode-supabase-broker
+opencode
+```
+
 Start the broker locally:
 
 ```bash
@@ -103,6 +110,8 @@ The plugin should call the deployed function URL at:
 https://<project-ref>.supabase.co/functions/v1/opencode-supabase-broker/exchange
 https://<project-ref>.supabase.co/functions/v1/opencode-supabase-broker/refresh
 ```
+
+The plugin currently requires a real broker base URL to be configured through `OPENCODE_SUPABASE_BROKER_URL`. There is intentionally no placeholder built-in default.
 
 ### Request and response shapes
 
