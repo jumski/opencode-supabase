@@ -104,6 +104,25 @@ opencode-supabase/
 - Current starter files are `.gitignore`, `CLAUDE.md`, `README.md`, `index.ts`, `package.json`, `tsconfig.json`, and `bun.lock`.
 - Task 1 should reshape this Bun starter scaffold into the dual-target plugin package rather than assuming a completely blank folder.
 
+## Current progress snapshot (2026-04-06)
+
+- Phase 1 is complete: the package is dual-target, install docs exist, and `/supabase` opens through the TUI plugin.
+- Phase 2 happy-path OAuth is complete: `/supabase` opens the browser, the local callback succeeds, the plugin exchanges through the broker, plugin-owned auth is persisted, and OpenCode now shows the success outcome instead of a false denial.
+- The reference broker implementation is functionally complete for v1 exchange and refresh, including local Supabase Edge Function serving, request validation, upstream normalization, and local setup docs.
+- The active next milestone is Phase 3 / Task 8: implement the first real authenticated Supabase Management API tool and prove restart persistence plus tool-time auth reuse.
+
+### Verified implementation findings that supersede earlier assumptions
+
+- The local plugin callback must use `http://localhost:<port>/auth/callback`, not `127.0.0.1`, because Supabase allows plain HTTP loopback for `localhost` but rejected `127.0.0.1` in real testing.
+- Supabase local Edge Function serving passes a function-prefixed path like `/opencode-supabase-broker/exchange`, so broker routing must normalize prefixed paths instead of matching only exact `/exchange` and `/refresh`.
+- The TUI-side `provider.oauth.callback(...)` flow must treat callback success according to the real SDK/client contract used at runtime. The implementation now handles the callback acknowledgment path correctly and no longer assumes a fake `{ type: "success" }` response shape from the TUI client surface.
+- The broker contract doc and current broker implementation still differ on internal/config failure responses: the implementation returns generic `500 server_error` JSON for those cases, while the contract doc still recommends only `400/401/429/502`. Keep this mismatch visible until reconciled.
+
+### Active focus
+
+- Do not spend more time on happy-path OAuth plumbing unless a new regression appears.
+- Prioritize Task 8 next.
+
 ## Donor mapping
 
 - `.worktrees/supabase/packages/opencode/src/plugin/supabase.ts:21` -> `src/shared/oauth.ts`
@@ -143,6 +162,8 @@ Execute this plan in phases. Do not start a later phase until the current phase 
 
 **Goal:** Prove packaging and command registration before implementing OAuth.
 
+**Status:** Completed on 2026-04-06.
+
 **Covers:** Task 1, Task 2, and Task 3.
 
 **Deliverable:**
@@ -177,6 +198,8 @@ Execute this plan in phases. Do not start a later phase until the current phase 
 
 **Goal:** Make `/supabase` perform the real OAuth flow and finish with clear success confirmation.
 
+**Status:** Completed on 2026-04-06.
+
 **Covers:** Task 4, Task 5, Task 6, and Task 7.
 
 **Deliverable:**
@@ -208,6 +231,10 @@ Execute this plan in phases. Do not start a later phase until the current phase 
 **Implementation note:**
 
 - Do not attempt direct token exchange from the plugin against Supabase Management API OAuth endpoints. Task 6 and Task 7 must pivot to the broker contract in `docs/plans/2026-04-06-supabase-oauth-broker-contract.md` for exchange and Task 9 must use the same boundary for refresh.
+- Real implementation follow-up notes from this phase:
+  - the callback host needed to be `localhost`, not `127.0.0.1`
+  - the broker needed to accept function-prefixed Edge Function paths during local serve
+  - the TUI callback success path needed to match the real runtime callback acknowledgment shape
 
 **Exit criteria:**
 
@@ -221,6 +248,8 @@ Execute this plan in phases. Do not start a later phase until the current phase 
 ### Phase 3: First authenticated Supabase tool
 
 **Goal:** Prove that persisted plugin-owned auth can power one real management tool after restart.
+
+**Status:** Current active milestone.
 
 **Covers:** Task 8.
 
@@ -250,6 +279,8 @@ Execute this plan in phases. Do not start a later phase until the current phase 
 ### Phase 4: Remaining tool surface plus token lifecycle handling
 
 **Goal:** Finish the management tool set and make auth refresh and failure paths reliable.
+
+**Status:** Not started.
 
 **Covers:** Task 9.
 
@@ -281,6 +312,8 @@ Execute this plan in phases. Do not start a later phase until the current phase 
 
 **Goal:** Make the plugin easy to install, verify, and hand off.
 
+**Status:** Partially started, but not complete until at least one real tool exists and README verification is re-run end to end.
+
 **Covers:** Task 10.
 
 **Deliverable:**
@@ -307,6 +340,8 @@ Execute this plan in phases. Do not start a later phase until the current phase 
 - prototype cleanup status is explicit
 
 ## Recommended execution order
+
+Current recommended next step: Task 8.
 
 1. Task 1: Scaffold the dual-target package
 2. Task 2: Make CLI install work with manual config as a fallback
