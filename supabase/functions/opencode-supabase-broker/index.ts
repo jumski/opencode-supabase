@@ -54,14 +54,28 @@ export function createReadConfig(env: EnvLike): () => BrokerConfig {
 
 type ConfigLoader = () => BrokerConfig;
 
+function normalizeRoutePath(pathname: string): "/exchange" | "/refresh" | undefined {
+  if (pathname === "/exchange" || pathname.endsWith("/exchange")) {
+    return "/exchange";
+  }
+
+  if (pathname === "/refresh" || pathname.endsWith("/refresh")) {
+    return "/refresh";
+  }
+
+  return undefined;
+}
+
 async function routeRequest(request: Request, config: BrokerConfig, fetchImpl: typeof fetch): Promise<Response> {
   const { pathname } = new URL(request.url);
+  console.log(`[broker request] ${request.method} ${pathname}`);
+  const routePath = normalizeRoutePath(pathname);
 
-  if (request.method === "POST" && pathname === "/exchange") {
+  if (request.method === "POST" && routePath === "/exchange") {
     return handleExchangeRequest(request, config, fetchImpl);
   }
 
-  if (request.method === "POST" && pathname === "/refresh") {
+  if (request.method === "POST" && routePath === "/refresh") {
     return handleRefreshRequest(request, config, fetchImpl);
   }
 

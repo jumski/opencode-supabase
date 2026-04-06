@@ -114,6 +114,43 @@ describe("supabase broker exchange", () => {
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
+
+  test("routes function-prefixed exchange paths used by Supabase local serve", async () => {
+    const fetchMock = mock(async () => {
+      return Response.json(
+        {
+          access_token: "access-prefixed",
+          refresh_token: "refresh-prefixed",
+          expires_in: 3600,
+          token_type: "bearer",
+        },
+        { status: 200 },
+      );
+    });
+
+    const response = await brokerHandler(
+      new Request("http://localhost:54321/opencode-supabase-broker/exchange", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          code: "code-prefixed",
+          code_verifier: "verifier-prefixed",
+          redirect_uri: "http://localhost:14589/auth/callback",
+        }),
+      }),
+      () => baseConfig,
+      fetchMock as unknown as typeof fetch,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      access_token: "access-prefixed",
+      refresh_token: "refresh-prefixed",
+      expires_in: 3600,
+      token_type: "bearer",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("supabase broker refresh", () => {
