@@ -44,11 +44,11 @@ export function readSupabaseConfig(
   env: SupabaseEnv = process.env,
 ): SupabaseSharedConfig {
   const clientId = requireString(
-    readStringOption(options, "clientId") ?? env.SUPABASE_CLIENT_ID,
+    readStringOption(options, "clientId") ?? env.OPENCODE_SUPABASE_OAUTH_CLIENT_ID,
     "clientId",
   );
   const oauthPort = requirePort(
-    readPortOption(options, "oauthPort") ?? env.SUPABASE_OAUTH_PORT,
+    readPortOption(options, "oauthPort") ?? env.OPENCODE_SUPABASE_OAUTH_PORT,
   );
 
   return {

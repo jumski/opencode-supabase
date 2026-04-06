@@ -1,8 +1,10 @@
 import type { Plugin } from "@opencode-ai/plugin";
 
-const server: Plugin = async () => {
+import { createSupabaseAuth } from "./auth.ts";
+
+const server: Plugin = async (input, options) => {
   return {
-    auth: undefined,
+    auth: createSupabaseAuth(input, options),
     tool: undefined,
   };
 };

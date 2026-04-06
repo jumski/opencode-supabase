@@ -33,8 +33,8 @@ describe("shared config", () => {
 
   test("reads values from env when plugin options are absent", () => {
     const config = readSupabaseConfig(undefined, {
-      SUPABASE_CLIENT_ID: "env-client",
-      SUPABASE_OAUTH_PORT: "4567",
+      OPENCODE_SUPABASE_OAUTH_CLIENT_ID: "env-client",
+      OPENCODE_SUPABASE_OAUTH_PORT: "4567",
       SUPABASE_OAUTH_AUTHORIZE_URL: "https://example.com/authorize",
       SUPABASE_OAUTH_TOKEN_URL: "https://example.com/token",
       SUPABASE_API_BASE_URL: "https://example.com/api",
@@ -72,8 +72,8 @@ describe("shared config", () => {
 
     expect(() =>
       readSupabaseConfig(undefined, {
-        SUPABASE_CLIENT_ID: "env-client",
-        SUPABASE_OAUTH_PORT: "abc",
+        OPENCODE_SUPABASE_OAUTH_CLIENT_ID: "env-client",
+        OPENCODE_SUPABASE_OAUTH_PORT: "abc",
       }),
     ).toThrow("Invalid Supabase config: oauthPort must be a positive integer");
   });
