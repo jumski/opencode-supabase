@@ -23,11 +23,6 @@ type AuthData = {
   method: string;
 };
 
-type CallbackData = {
-  type: string;
-  access?: string;
-};
-
 export function SupabaseDialog(props: SupabaseDialogProps) {
   const [state, setState] = createSignal<OAuthState>({ type: "idle" });
 
@@ -71,15 +66,15 @@ export function SupabaseDialog(props: SupabaseDialogProps) {
       const callbackResponse = (await props.api.client.provider.oauth.callback({
         providerID: "supabase",
         method: 0,
-      })) as unknown as ApiResponse<CallbackData>;
+      })) as unknown as ApiResponse<boolean>;
 
       if (callbackResponse.error) {
         throw new Error(callbackResponse.error.message || "OAuth callback failed");
       }
 
-      const callbackData = callbackResponse.data;
+      const callbackSucceeded = callbackResponse.data === true;
 
-      if (callbackData?.type === "success") {
+      if (callbackSucceeded) {
         setState({ type: "success" });
         props.api.ui.toast({
           variant: "success",

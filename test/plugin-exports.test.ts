@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 
 import { createSupabaseCommand } from "../src/tui/commands.ts";
+import { SupabaseDialog } from "../src/tui/dialog.tsx";
 import serverModule from "../src/server/index.ts";
 import tuiModule from "../src/tui/index.tsx";
 
@@ -63,7 +64,7 @@ test("tui plugin registers /supabase and opens a closable dialog", async () => {
         provider: {
           oauth: {
             authorize: () => Promise.resolve({ data: { url: "https://example.com/auth", instructions: "Test", method: "auto" } }),
-            callback: () => Promise.resolve({ data: { type: "success" } }),
+            callback: () => Promise.resolve({ data: true }),
           },
         },
       },
@@ -92,5 +93,45 @@ test("tui plugin registers /supabase and opens a closable dialog", async () => {
 
   // Cancel should clear the dialog immediately
   dialog?.onCancel?.();
+  expect(cleared).toBe(1);
+});
+
+test("supabase dialog treats boolean callback success as connected", async () => {
+  const toasts: Array<{ variant?: string; message: string }> = [];
+  let cleared = 0;
+
+  const api = {
+    ui: {
+      DialogAlert: (input: unknown) => input,
+      DialogConfirm: (input: unknown) => input,
+      toast: (input: { variant?: string; message: string }) => {
+        toasts.push(input);
+      },
+      dialog: {
+        clear: () => {
+          cleared += 1;
+        },
+      },
+    },
+    client: {
+      provider: {
+        oauth: {
+          authorize: () => Promise.resolve({ data: { url: "https://example.com/auth", instructions: "Test", method: "manual" } }),
+          callback: () => Promise.resolve({ data: true }),
+        },
+      },
+    },
+  } as any;
+
+  const dialog = SupabaseDialog({ api, onClose: () => api.ui.dialog.clear() }) as {
+    onConfirm?: () => Promise<void>;
+  };
+
+  await dialog.onConfirm?.();
+
+  expect(toasts).toHaveLength(1);
+  expect(toasts[0]).toMatchObject({
+    variant: "success",
+  });
   expect(cleared).toBe(1);
 });
