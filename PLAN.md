@@ -37,7 +37,7 @@
 - That invalidates the earlier assumption that this plugin could complete the documented Management API OAuth flow as a pure public `client_id`-only PKCE client.
 - The extracted plugin must not hold or ship `client_secret`.
 - Therefore the live auth flow pivots to a stateless broker that holds `client_secret` server-side and exposes only exchange and refresh endpoints.
-- The broker contract in `docs/plans/2026-04-06-supabase-oauth-broker-contract.md` is the source of truth for that boundary.
+- The broker contract in `docs/supabase-oauth-broker-contract.md` is the source of truth for that boundary.
 
 ## Assumptions
 
@@ -150,7 +150,7 @@ Execute this plan in phases. Do not start a later phase until the current phase 
 - Keep provider id exactly `supabase`.
 - Do not rely on a `client_secret` inside the plugin repo; the live OAuth flow depends on an external broker that holds it server-side.
 - Keep the plugin-side OAuth responsibilities local: authorize URL creation, PKCE, `state`, callback handling, and local token persistence.
-- From Task 6 onward, end-to-end OAuth verification requires a reachable broker implementation that matches `docs/plans/2026-04-06-supabase-oauth-broker-contract.md`.
+- From Task 6 onward, end-to-end OAuth verification requires a reachable broker implementation that matches `docs/supabase-oauth-broker-contract.md`.
 - Do not add custom HTTP routes.
 - Do not try to integrate Supabase into the stock provider picker.
 - Browser auto-open is a plugin responsibility. If it fails, the dialog must still show the URL and clear instructions.
@@ -230,7 +230,7 @@ Execute this plan in phases. Do not start a later phase until the current phase 
 
 **Implementation note:**
 
-- Do not attempt direct token exchange from the plugin against Supabase Management API OAuth endpoints. Task 6 and Task 7 must pivot to the broker contract in `docs/plans/2026-04-06-supabase-oauth-broker-contract.md` for exchange and Task 9 must use the same boundary for refresh.
+- Do not attempt direct token exchange from the plugin against Supabase Management API OAuth endpoints. Task 6 and Task 7 must pivot to the broker contract in `docs/supabase-oauth-broker-contract.md` for exchange and Task 9 must use the same boundary for refresh.
 - Real implementation follow-up notes from this phase:
   - the callback host needed to be `localhost`, not `127.0.0.1`
   - the broker needed to accept function-prefixed Edge Function paths during local serve
@@ -521,7 +521,7 @@ opencode plugin ../../opencode-supabase
 
 - This task extracts reusable authorize, config, and Management API helpers only.
 - The live token exchange and refresh path is no longer expected to happen directly from the plugin.
-- Task 6 and Task 9 should move those confidential token operations behind the broker contract in `docs/plans/2026-04-06-supabase-oauth-broker-contract.md`.
+- Task 6 and Task 9 should move those confidential token operations behind the broker contract in `docs/supabase-oauth-broker-contract.md`.
 
 **Verification**
 
@@ -568,7 +568,7 @@ type Saved = {
 - Create: `src/server/auth.ts`
 - Modify: `src/server/index.ts`
 - Modify: `src/shared/cfg.ts`
-- Reference: `docs/plans/2026-04-06-supabase-oauth-broker-contract.md`
+- Reference: `docs/supabase-oauth-broker-contract.md`
 - Reference: `packages/plugin/src/index.ts:56`
 - Reference: `packages/opencode/src/provider/auth.ts:165`
 - Reference: `packages/opencode/src/server/routes/provider.ts:87`
@@ -597,7 +597,7 @@ auth: {
 3. Keep the browser-based flow: start a local callback server, build the authorize URL locally, and return `{ url, instructions, method: "auto", callback }`.
 4. Replace any single global pending OAuth object in plugin code with a state-keyed map. Use `packages/opencode/src/mcp/oauth-callback.ts` as a hardening reference for pending-state handling and port-in-use checks.
 5. Move HTML success and error responses into `src/server/auth.ts`.
-6. Create `src/shared/broker.ts` for the broker HTTP client. It should implement only the contract in `docs/plans/2026-04-06-supabase-oauth-broker-contract.md`, not a generic proxy client, and it should read the broker base URL through one isolated config lookup so an official default and local-development override can coexist cleanly.
+6. Create `src/shared/broker.ts` for the broker HTTP client. It should implement only the contract in `docs/supabase-oauth-broker-contract.md`, not a generic proxy client, and it should read the broker base URL through one isolated config lookup so an official default and local-development override can coexist cleanly.
 7. In the callback, exchange the code by calling broker `POST /exchange` with `code`, `code_verifier`, and `redirect_uri`, then write the returned tokens to `src/server/store.ts`, and return `{ type: "success", access, refresh, expires }` so OpenCode persists provider auth too.
 8. Do not add custom HTTP routes.
 

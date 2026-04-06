@@ -9,7 +9,7 @@ type SupabaseDialogProps = {
 type OAuthState =
   | { type: "idle" }
   | { type: "authorizing"; url: string }
-  | { type: "waiting_callback" }
+  | { type: "waiting_callback"; url: string }
   | { type: "success" }
   | { type: "error"; message: string };
 
@@ -60,7 +60,7 @@ export function SupabaseDialog(props: SupabaseDialogProps) {
         }
       }
 
-      setState({ type: "waiting_callback" });
+      setState({ type: "waiting_callback", url });
 
       // Wait for callback
       const callbackResponse = (await props.api.client.provider.oauth.callback({
@@ -78,8 +78,7 @@ export function SupabaseDialog(props: SupabaseDialogProps) {
         setState({ type: "success" });
         props.api.ui.toast({
           variant: "success",
-          message:
-            "Connected to Supabase. You can now list orgs, list projects, create projects, and fetch project API keys.",
+          message: "Connected to Supabase. Management tools coming in next update.",
         });
         props.onClose();
       } else {
@@ -121,7 +120,7 @@ export function SupabaseDialog(props: SupabaseDialogProps) {
   if (currentState.type === "waiting_callback") {
     return props.api.ui.DialogAlert({
       title: "Connect Supabase",
-      message: "Waiting for authorization in your browser...",
+      message: `Waiting for authorization in your browser...\n\nIf you need to complete authorization manually, visit:\n${currentState.url}`,
       onConfirm: props.onClose,
     });
   }
