@@ -9,10 +9,36 @@ Compatibility: external TUI plugin loading through `.opencode/tui.jsonc` and the
 Preferred install on a compatible OpenCode version:
 
 ```bash
+opencode plugin /absolute/path/to/opencode-supabase
+```
+
+Sibling-checkout alternative:
+
+```bash
 opencode plugin ../../opencode-supabase
 ```
 
 Optional manual setup if you want to wire the config yourself:
+
+Absolute-path example:
+
+`.opencode/opencode.jsonc`
+
+```json
+{
+  "plugin": ["/absolute/path/to/opencode-supabase"]
+}
+```
+
+`.opencode/tui.jsonc`
+
+```json
+{
+  "plugin": ["/absolute/path/to/opencode-supabase"]
+}
+```
+
+Sibling-checkout relative example:
 
 `.opencode/opencode.jsonc`
 
@@ -30,7 +56,7 @@ Optional manual setup if you want to wire the config yourself:
 }
 ```
 
-Use a sibling checkout from the consumer repo so the relative path resolves correctly. For manual config, the relative path is resolved from inside `.opencode/`, not from the consumer repo root, so `../../opencode-supabase` is correct for a sibling checkout. Both files must be configured because server and TUI plugins load from separate config surfaces.
+Absolute paths are the clearest option for manual config. If you prefer a relative path, it is resolved from inside `.opencode/`, not from the consumer repo root. For a sibling checkout, `../../opencode-supabase` is usually correct. Both files must be configured because server and TUI plugins load from separate config surfaces.
 
 ## Development
 
@@ -55,6 +81,70 @@ The broker is a single Supabase Edge Function that handles confidential token op
 
 The plugin owns browser authorization, PKCE, the local callback server, and local token storage. The broker holds `client_secret` and makes token requests using Basic auth.
 
+## Local Setup
+
+There are two separate environments to configure:
+
+1. the local Supabase Edge Function runtime
+2. the consumer project shell that launches `opencode`
+
+### 1. Broker runtime environment
+
+These variables are used by the local Supabase Edge Function.
+
+Required:
+
+```bash
+OPENCODE_SUPABASE_OAUTH_CLIENT_ID=<your_supabase_oauth_app_client_id>
+OPENCODE_SUPABASE_OAUTH_CLIENT_SECRET=<your_supabase_oauth_app_client_secret>
+```
+
+Optional:
+
+```bash
+# Defaults shown
+OPENCODE_SUPABASE_OAUTH_TOKEN_URL=https://api.supabase.com/v1/oauth/token
+OPENCODE_SUPABASE_ALLOWED_REDIRECT_HOSTS=127.0.0.1,localhost
+OPENCODE_SUPABASE_ALLOWED_REDIRECT_PATHS=/auth/callback
+```
+
+Recommended local file:
+
+- `supabase/functions/.env`
+
+Committed template:
+
+- `supabase/functions/.env.example`
+
+Start the broker locally:
+
+```bash
+supabase functions serve opencode-supabase-broker --env-file supabase/functions/.env
+```
+
+The broker fails fast on the first request if required secrets are missing - callers receive a generic `500 server_error` JSON response. Detailed cause is logged for operators; no internal details are exposed to callers.
+
+### 2. Consumer project / OpenCode environment
+
+These variables must be present in the shell before launching `opencode` in the consumer repo.
+
+Required:
+
+```bash
+export OPENCODE_SUPABASE_BROKER_URL=http://127.0.0.1:54321/functions/v1/opencode-supabase-broker
+export OPENCODE_SUPABASE_OAUTH_CLIENT_ID=<your_supabase_oauth_app_client_id>
+export OPENCODE_SUPABASE_OAUTH_PORT=14589
+```
+
+Notes:
+
+- `OPENCODE_SUPABASE_BROKER_URL` is required. There is intentionally no built-in placeholder default.
+- `OPENCODE_SUPABASE_OAUTH_CLIENT_ID` must match the OAuth app configured for the broker.
+- `OPENCODE_SUPABASE_OAUTH_PORT` controls the local callback URL the plugin listens on.
+- The callback path is `/auth/callback`, so the full local callback URL is `http://127.0.0.1:<port>/auth/callback`.
+
+Your Supabase OAuth app must allow that redirect URI.
+
 ### Local development
 
 The plugin inherits environment variables from the OpenCode CLI process. For local broker development, point the plugin at your local function URL before launching OpenCode:
@@ -64,29 +154,13 @@ export OPENCODE_SUPABASE_BROKER_URL=http://127.0.0.1:54321/functions/v1/opencode
 opencode
 ```
 
-Start the broker locally:
+Quick local test flow:
 
-```bash
-supabase functions serve opencode-supabase-broker --env-file .env.local
-```
-
-Required secrets (set in `.env.local` or via `supabase secrets set`):
-
-```bash
-OPENCODE_SUPABASE_OAUTH_CLIENT_ID=<your_supabase_oauth_app_client_id>
-OPENCODE_SUPABASE_OAUTH_CLIENT_SECRET=<your_supabase_oauth_app_client_secret>
-```
-
-Optional overrides:
-
-```bash
-# Defaults shown
-OPENCODE_SUPABASE_OAUTH_TOKEN_URL=https://api.supabase.com/v1/oauth/token
-OPENCODE_SUPABASE_ALLOWED_REDIRECT_HOSTS=127.0.0.1,localhost
-OPENCODE_SUPABASE_ALLOWED_REDIRECT_PATHS=/auth/callback
-```
-
-The broker fails fast on the first request if required secrets are missing — callers receive a generic `500 server_error` JSON response. Detailed cause is logged for operators; no internal details are exposed to callers.
+1. create `supabase/functions/.env` from `supabase/functions/.env.example`
+2. start the broker locally
+3. export the consumer-project variables above
+4. launch `opencode` in the consumer repo
+5. run `/supabase`
 
 ### Deployment
 
@@ -111,7 +185,7 @@ https://<project-ref>.supabase.co/functions/v1/opencode-supabase-broker/exchange
 https://<project-ref>.supabase.co/functions/v1/opencode-supabase-broker/refresh
 ```
 
-The plugin currently requires a real broker base URL to be configured through `OPENCODE_SUPABASE_BROKER_URL`. There is intentionally no placeholder built-in default.
+The plugin currently requires a real broker base URL to be configured through `OPENCODE_SUPABASE_BROKER_URL`.
 
 ### Request and response shapes
 
