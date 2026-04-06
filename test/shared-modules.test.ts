@@ -113,13 +113,13 @@ describe("shared oauth", () => {
         clientId: "plugin-client",
         authorizeUrl: "https://example.com/oauth/authorize",
       },
-      "http://127.0.0.1:1456/callback",
+      "http://localhost:1456/callback",
       { verifier: "verifier", challenge: "challenge" },
       "state-123",
     );
 
     expect(url).toBe(
-      "https://example.com/oauth/authorize?response_type=code&client_id=plugin-client&redirect_uri=http%3A%2F%2F127.0.0.1%3A1456%2Fcallback&code_challenge=challenge&code_challenge_method=S256&state=state-123",
+      "https://example.com/oauth/authorize?response_type=code&client_id=plugin-client&redirect_uri=http%3A%2F%2Flocalhost%3A1456%2Fcallback&code_challenge=challenge&code_challenge_method=S256&state=state-123",
     );
   });
 });
@@ -137,7 +137,7 @@ describe("broker client", () => {
       const body = JSON.parse(String(init?.body));
       expect(body.code).toBe("code-123");
       expect(body.code_verifier).toBe("verifier-123");
-      expect(body.redirect_uri).toBe("http://127.0.0.1:1456/callback");
+      expect(body.redirect_uri).toBe("http://localhost:1456/callback");
 
       return new Response(
         JSON.stringify({
@@ -158,7 +158,7 @@ describe("broker client", () => {
       {
         code: "code-123",
         code_verifier: "verifier-123",
-        redirect_uri: "http://127.0.0.1:1456/callback",
+        redirect_uri: "http://localhost:1456/callback",
       },
       fetchMock as unknown as FetchLike,
     );
@@ -268,7 +268,7 @@ describe("broker client", () => {
         {
           code: "code-123",
           code_verifier: "verifier-123",
-          redirect_uri: "http://127.0.0.1:1456/callback",
+          redirect_uri: "http://localhost:1456/callback",
         },
         fetchMock as unknown as FetchLike,
       ),

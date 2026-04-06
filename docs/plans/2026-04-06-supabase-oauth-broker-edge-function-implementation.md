@@ -70,7 +70,7 @@ The Edge Function must read these values from environment/secrets in `index.ts` 
 - `OPENCODE_SUPABASE_OAUTH_CLIENT_ID`
 - `OPENCODE_SUPABASE_OAUTH_CLIENT_SECRET`
 - optional `OPENCODE_SUPABASE_OAUTH_TOKEN_URL` defaulting to `https://api.supabase.com/v1/oauth/token`
-- optional `OPENCODE_SUPABASE_ALLOWED_REDIRECT_HOSTS` defaulting to `127.0.0.1,localhost`
+- optional `OPENCODE_SUPABASE_ALLOWED_REDIRECT_HOSTS` defaulting to `localhost`
 - optional `OPENCODE_SUPABASE_ALLOWED_REDIRECT_PATHS` defaulting to `/auth/callback`
 
 The portable layers must not call `Deno.env.get()` directly.
@@ -85,7 +85,7 @@ Accept only:
 {
   "code": "string",
   "code_verifier": "string",
-  "redirect_uri": "http://127.0.0.1:14589/auth/callback"
+  "redirect_uri": "http://localhost:14589/auth/callback"
 }
 ```
 

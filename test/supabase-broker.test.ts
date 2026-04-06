@@ -9,14 +9,14 @@ const baseConfig: BrokerConfig = {
   clientId: "client-id",
   clientSecret: "client-secret",
   tokenUrl: "https://api.supabase.com/v1/oauth/token",
-  allowedRedirectHosts: ["127.0.0.1", "localhost"],
+  allowedRedirectHosts: ["localhost"],
   allowedRedirectPaths: ["/auth/callback"],
 };
 
 describe("supabase broker exchange", () => {
   test("rejects malformed exchange json with a normalized 400 response", async () => {
     const response = await handleExchangeRequest(
-      new Request("http://127.0.0.1:54321/exchange", {
+      new Request("http://localhost:54321/exchange", {
         method: "POST",
         body: "{",
         headers: { "Content-Type": "application/json" },
@@ -42,7 +42,7 @@ describe("supabase broker exchange", () => {
     });
 
     const response = await handleExchangeRequest(
-      new Request("http://127.0.0.1:54321/exchange", {
+      new Request("http://localhost:54321/exchange", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -79,7 +79,7 @@ describe("supabase broker exchange", () => {
       expect(body.get("grant_type")).toBe("authorization_code");
       expect(body.get("code")).toBe("code-123");
       expect(body.get("code_verifier")).toBe("verifier-123");
-      expect(body.get("redirect_uri")).toBe("http://127.0.0.1:14589/auth/callback");
+      expect(body.get("redirect_uri")).toBe("http://localhost:14589/auth/callback");
 
       const payload: TokenResponse = {
         access_token: "access-123",
@@ -92,13 +92,13 @@ describe("supabase broker exchange", () => {
     });
 
     const response = await handleExchangeRequest(
-      new Request("http://127.0.0.1:54321/exchange", {
+      new Request("http://localhost:54321/exchange", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           code: "code-123",
           code_verifier: "verifier-123",
-          redirect_uri: "http://127.0.0.1:14589/auth/callback",
+          redirect_uri: "http://localhost:14589/auth/callback",
         }),
       }),
       baseConfig,
@@ -119,7 +119,7 @@ describe("supabase broker exchange", () => {
 describe("supabase broker refresh", () => {
   test("rejects malformed refresh payloads with normalized 400 json", async () => {
     const response = await handleRefreshRequest(
-      new Request("http://127.0.0.1:54321/refresh", {
+      new Request("http://localhost:54321/refresh", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ refresh_token: "" }),
@@ -160,7 +160,7 @@ describe("supabase broker refresh", () => {
     });
 
     const response = await handleRefreshRequest(
-      new Request("http://127.0.0.1:54321/refresh", {
+      new Request("http://localhost:54321/refresh", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ refresh_token: "refresh-abc" }),
@@ -185,7 +185,7 @@ describe("supabase broker refresh", () => {
     });
 
     const response = await handleRefreshRequest(
-      new Request("http://127.0.0.1:54321/refresh", {
+      new Request("http://localhost:54321/refresh", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ refresh_token: "revoked-token" }),
@@ -209,7 +209,7 @@ describe("supabase broker refresh", () => {
     });
 
     const response = await handleRefreshRequest(
-      new Request("http://127.0.0.1:54321/refresh", {
+      new Request("http://localhost:54321/refresh", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ refresh_token: "valid-but-bad-response" }),
@@ -249,7 +249,7 @@ describe("broker config", () => {
     });
 
     expect(config.tokenUrl).toBe("https://api.supabase.com/v1/oauth/token");
-    expect(config.allowedRedirectHosts).toEqual(["127.0.0.1", "localhost"]);
+    expect(config.allowedRedirectHosts).toEqual(["localhost"]);
     expect(config.allowedRedirectPaths).toEqual(["/auth/callback"]);
   });
 
@@ -272,10 +272,10 @@ describe("broker config", () => {
 describe("broker edge handler config failures", () => {
   test("returns generic 500 json when client_id is missing", async () => {
     const response = await handleBrokerRequest(
-      new Request("http://127.0.0.1:54321/exchange", {
+      new Request("http://localhost:54321/exchange", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code: "x", code_verifier: "y", redirect_uri: "http://127.0.0.1:14589/auth/callback" }),
+        body: JSON.stringify({ code: "x", code_verifier: "y", redirect_uri: "http://localhost:14589/auth/callback" }),
       }),
     );
 
@@ -290,7 +290,7 @@ describe("broker edge handler config failures", () => {
 
   test("returns generic 500 json when client_secret is missing", async () => {
     const response = await handleBrokerRequest(
-      new Request("http://127.0.0.1:54321/refresh", {
+      new Request("http://localhost:54321/refresh", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ refresh_token: "some-token" }),
@@ -308,10 +308,10 @@ describe("broker edge handler config failures", () => {
 
   test("response body does not leak env var names or secret details", async () => {
     const response = await handleBrokerRequest(
-      new Request("http://127.0.0.1:54321/exchange", {
+      new Request("http://localhost:54321/exchange", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code: "x", code_verifier: "y", redirect_uri: "http://127.0.0.1:14589/auth/callback" }),
+        body: JSON.stringify({ code: "x", code_verifier: "y", redirect_uri: "http://localhost:14589/auth/callback" }),
       }),
     );
 
@@ -324,10 +324,10 @@ describe("broker edge handler config failures", () => {
 
   test("returns generic internal server error message for non-config failures", async () => {
     const response = await brokerHandler(
-      new Request("http://127.0.0.1:54321/exchange", {
+      new Request("http://localhost:54321/exchange", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code: "x", code_verifier: "y", redirect_uri: "http://127.0.0.1:14589/auth/callback" }),
+        body: JSON.stringify({ code: "x", code_verifier: "y", redirect_uri: "http://localhost:14589/auth/callback" }),
       }),
       () => {
         throw new Error("unexpected runtime failure");
@@ -346,10 +346,10 @@ describe("broker edge handler config failures", () => {
 
   test("returns application/json content-type on 500 responses", async () => {
     const response = await handleBrokerRequest(
-      new Request("http://127.0.0.1:54321/exchange", {
+      new Request("http://localhost:54321/exchange", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code: "x", code_verifier: "y", redirect_uri: "http://127.0.0.1:14589/auth/callback" }),
+        body: JSON.stringify({ code: "x", code_verifier: "y", redirect_uri: "http://localhost:14589/auth/callback" }),
       }),
     );
 
@@ -365,7 +365,7 @@ describe("broker edge handler config failures", () => {
     });
 
     const response = await brokerHandler(
-      new Request("http://127.0.0.1:54321/refresh", {
+      new Request("http://localhost:54321/refresh", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ refresh_token: "refresh-token-rt" }),

@@ -35,7 +35,7 @@ Optional:
 
 ```bash
 OPENCODE_SUPABASE_OAUTH_TOKEN_URL=https://api.supabase.com/v1/oauth/token
-OPENCODE_SUPABASE_ALLOWED_REDIRECT_HOSTS=127.0.0.1,localhost
+OPENCODE_SUPABASE_ALLOWED_REDIRECT_HOSTS=localhost
 OPENCODE_SUPABASE_ALLOWED_REDIRECT_PATHS=/auth/callback
 ```
 
@@ -56,7 +56,7 @@ supabase functions serve opencode-supabase-broker --env-file supabase/functions/
 Expected local broker base URL:
 
 ```text
-http://127.0.0.1:54321/functions/v1/opencode-supabase-broker
+http://localhost:54321/functions/v1/opencode-supabase-broker
 ```
 
 ## 2. Consumer project / OpenCode environment
@@ -66,7 +66,7 @@ These variables must exist in the shell before launching `opencode` in the consu
 Required:
 
 ```bash
-export OPENCODE_SUPABASE_BROKER_URL=http://127.0.0.1:54321/functions/v1/opencode-supabase-broker
+export OPENCODE_SUPABASE_BROKER_URL=http://localhost:54321/functions/v1/opencode-supabase-broker
 export OPENCODE_SUPABASE_OAUTH_CLIENT_ID=<your_supabase_oauth_app_client_id>
 export OPENCODE_SUPABASE_OAUTH_PORT=14589
 ```
@@ -81,7 +81,7 @@ Notes:
 Full default callback example:
 
 ```text
-http://127.0.0.1:14589/auth/callback
+http://localhost:14589/auth/callback
 ```
 
 Your Supabase OAuth app must allow that redirect URI.
@@ -135,7 +135,7 @@ supabase functions serve opencode-supabase-broker --env-file supabase/functions/
 Export the required variables:
 
 ```bash
-export OPENCODE_SUPABASE_BROKER_URL=http://127.0.0.1:54321/functions/v1/opencode-supabase-broker
+export OPENCODE_SUPABASE_BROKER_URL=http://localhost:54321/functions/v1/opencode-supabase-broker
 export OPENCODE_SUPABASE_OAUTH_CLIENT_ID=<your_supabase_oauth_app_client_id>
 export OPENCODE_SUPABASE_OAUTH_PORT=14589
 ```
@@ -177,7 +177,7 @@ Expected result:
 Missing broker URL in the plugin shell:
 
 ```bash
-export OPENCODE_SUPABASE_BROKER_URL=http://127.0.0.1:54321/functions/v1/opencode-supabase-broker
+export OPENCODE_SUPABASE_BROKER_URL=http://localhost:54321/functions/v1/opencode-supabase-broker
 ```
 
 Missing plugin client ID:

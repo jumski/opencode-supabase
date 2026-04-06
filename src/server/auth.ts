@@ -54,12 +54,12 @@ let serverPort: number | undefined;
 const pendingAuths = new Map<string, PendingAuth>();
 
 function callbackUrl(port: number) {
-  return `http://127.0.0.1:${port}${CALLBACK_PATH}`;
+  return `http://localhost:${port}${CALLBACK_PATH}`;
 }
 
 async function isPortInUse(port: number) {
   return new Promise<boolean>((resolve) => {
-    const socket = createConnection(port, "127.0.0.1");
+    const socket = createConnection(port, "localhost");
     socket.on("connect", () => {
       socket.destroy();
       resolve(true);

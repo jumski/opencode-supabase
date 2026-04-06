@@ -66,7 +66,7 @@ Supabase remains:
 ### Initial login
 
 1. The plugin generates `state`, PKCE `code_verifier`, and `code_challenge`.
-2. The plugin starts a local callback listener such as `http://127.0.0.1:<port>/auth/callback`.
+2. The plugin starts a local callback listener such as `http://localhost:<port>/auth/callback`.
 3. The plugin opens the browser to `https://api.supabase.com/v1/oauth/authorize` with:
    - `client_id`
    - `redirect_uri`
@@ -103,7 +103,7 @@ Request JSON:
 {
   "code": "string",
   "code_verifier": "string",
-  "redirect_uri": "http://127.0.0.1:14589/auth/callback"
+  "redirect_uri": "http://localhost:14589/auth/callback"
 }
 ```
 
@@ -221,7 +221,7 @@ The broker should never return raw HTML or opaque passthrough responses to the p
 
 The broker should accept only local plugin callback URLs. Recommended patterns:
 
-- `http://127.0.0.1:<port>/auth/callback`
+- `http://localhost:<port>/auth/callback`
 - optionally `http://localhost:<port>/auth/callback` if the plugin intentionally supports it
 
 The broker should reject:

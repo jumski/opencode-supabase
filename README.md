@@ -110,7 +110,7 @@ Optional:
 ```bash
 # Defaults shown
 OPENCODE_SUPABASE_OAUTH_TOKEN_URL=https://api.supabase.com/v1/oauth/token
-OPENCODE_SUPABASE_ALLOWED_REDIRECT_HOSTS=127.0.0.1,localhost
+OPENCODE_SUPABASE_ALLOWED_REDIRECT_HOSTS=localhost
 OPENCODE_SUPABASE_ALLOWED_REDIRECT_PATHS=/auth/callback
 ```
 
@@ -137,7 +137,7 @@ These variables must be present in the shell before launching `opencode` in the 
 Required:
 
 ```bash
-export OPENCODE_SUPABASE_BROKER_URL=http://127.0.0.1:54321/functions/v1/opencode-supabase-broker
+export OPENCODE_SUPABASE_BROKER_URL=http://localhost:54321/functions/v1/opencode-supabase-broker
 export OPENCODE_SUPABASE_OAUTH_CLIENT_ID=<your_supabase_oauth_app_client_id>
 export OPENCODE_SUPABASE_OAUTH_PORT=14589
 ```
@@ -147,7 +147,7 @@ Notes:
 - `OPENCODE_SUPABASE_BROKER_URL` is required. There is intentionally no built-in placeholder default.
 - `OPENCODE_SUPABASE_OAUTH_CLIENT_ID` must match the OAuth app configured for the broker.
 - `OPENCODE_SUPABASE_OAUTH_PORT` controls the local callback URL the plugin listens on.
-- The callback path is `/auth/callback`, so the full local callback URL is `http://127.0.0.1:<port>/auth/callback`.
+- The callback path is `/auth/callback`, so the full local callback URL is `http://localhost:<port>/auth/callback`.
 
 Your Supabase OAuth app must allow that redirect URI.
 
@@ -156,7 +156,7 @@ Your Supabase OAuth app must allow that redirect URI.
 The plugin inherits environment variables from the OpenCode CLI process. For local broker development, point the plugin at your local function URL before launching OpenCode:
 
 ```bash
-export OPENCODE_SUPABASE_BROKER_URL=http://127.0.0.1:54321/functions/v1/opencode-supabase-broker
+export OPENCODE_SUPABASE_BROKER_URL=http://localhost:54321/functions/v1/opencode-supabase-broker
 opencode
 ```
 

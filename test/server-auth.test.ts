@@ -63,7 +63,7 @@ describe("server auth hook", () => {
     expect(url.origin + url.pathname).toBe("https://api.supabase.com/v1/oauth/authorize");
     expect(url.searchParams.get("client_id")).toBe("plugin-client");
     expect(url.searchParams.get("state")).toBeTruthy();
-    expect(url.searchParams.get("redirect_uri")).toBe("http://127.0.0.1:17654/auth/callback");
+    expect(url.searchParams.get("redirect_uri")).toBe("http://localhost:17654/auth/callback");
     expect(typeof result?.callback).toBe("function");
   });
 
@@ -116,7 +116,7 @@ describe("server auth hook", () => {
       const body = JSON.parse(String(init?.body));
       expect(body.code).toBe("code-123");
       expect(body.code_verifier).toBeTruthy();
-      expect(body.redirect_uri).toBe("http://127.0.0.1:17656/auth/callback");
+      expect(body.redirect_uri).toBe("http://localhost:17656/auth/callback");
 
       return new Response(
         JSON.stringify({

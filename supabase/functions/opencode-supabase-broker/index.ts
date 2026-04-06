@@ -11,7 +11,7 @@ declare const Deno: {
 };
 
 const DEFAULT_TOKEN_URL = "https://api.supabase.com/v1/oauth/token";
-const DEFAULT_REDIRECT_HOSTS = ["127.0.0.1", "localhost"];
+const DEFAULT_REDIRECT_HOSTS = ["localhost"];
 const DEFAULT_REDIRECT_PATHS = ["/auth/callback"];
 
 function readList(value: string | undefined, fallback: string[]): string[] {
