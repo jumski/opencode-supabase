@@ -1,5 +1,6 @@
 import type { PluginInput } from "@opencode-ai/plugin";
-import { join } from "node:path";
+import { mkdir } from "node:fs/promises";
+import { dirname, join } from "node:path";
 
 type StoreInput = Pick<PluginInput, "directory" | "worktree">;
 
@@ -36,11 +37,13 @@ export async function read(input: StoreInput): Promise<SavedState> {
 
 export async function write(input: StoreInput, auth: SavedAuth): Promise<void> {
   const path = file(input);
+  await mkdir(dirname(path), { recursive: true });
   await Bun.write(path, JSON.stringify({ version: 1, auth }, null, 2));
 }
 
 export async function clear(input: StoreInput): Promise<void> {
   const path = file(input);
+  await mkdir(dirname(path), { recursive: true });
   await Bun.write(path, JSON.stringify({ version: 1 }, null, 2));
 }
 
