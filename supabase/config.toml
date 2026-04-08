@@ -1,0 +1,4 @@
+project_id = "opencode-supabase"
+
+[functions.opencode-supabase-broker]
+verify_jwt = false

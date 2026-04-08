@@ -2,17 +2,18 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Extract the Supabase prototype into a standalone dual-target plugin package that installs with `opencode plugin opencode-supabase`, exposes `/supabase` in the TUI, completes browser OAuth, persists auth for later tool use, and provides Supabase Management API tools.
+**Goal:** Extract the Supabase prototype into a standalone dual-target plugin package that installs through `opencode plugin` on compatible OpenCode versions, supports manual local-path configuration as a fallback, exposes `/supabase` in the TUI, completes browser OAuth through a stateless token broker, persists auth for later tool use, and provides Supabase Management API tools.
 
-**Architecture:** Ship one npm package with two target-only entrypoints, `./server` and `./tui`, because OpenCode rejects a single module exporting both `server` and `tui`; see `packages/opencode/src/plugin/shared.ts:89` and `packages/opencode/src/plugin/shared.ts:277`. Put shared OAuth and API code under `src/shared`, auth and tool logic under `src/server`, and `/supabase` command and dialog UX under `src/tui`. Persist tokens in plugin-owned storage because external tools do not get host auth-read access; see `packages/plugin/src/tool.ts:3`. Use a public PKCE OAuth client flow with `client_id` only in the extracted plugin rather than copying the prototype's secret-based exchange logic.
+**Architecture:** Ship one npm package with two target-only entrypoints, `./server` and `./tui`, because OpenCode rejects a single module exporting both `server` and `tui`; see `packages/opencode/src/plugin/shared.ts:89` and `packages/opencode/src/plugin/shared.ts:277`. Put shared OAuth and API code under `src/shared`, auth and tool logic under `src/server`, and `/supabase` command and dialog UX under `src/tui`. Persist tokens in plugin-owned storage because external tools do not get host auth-read access; see `packages/plugin/src/tool.ts:3`. The plugin owns the public `client_id`, PKCE generation, `state`, local callback handling, and local token storage. A separate stateless broker owns only confidential token exchange and refresh against `https://api.supabase.com/v1/oauth/token` because Supabase Management API OAuth Apps document `client_secret` usage at the token step.
 
-**Tech Stack:** Bun, TypeScript, `@opencode-ai/plugin`, `@opencode-ai/plugin/tui`, `@opencode-ai/sdk`, `zod`, `open`, Supabase OAuth, Supabase Management API.
+**Tech Stack:** Bun, TypeScript, `@opencode-ai/plugin`, `@opencode-ai/plugin/tui`, `@opencode-ai/sdk`, `zod`, `open`, Supabase OAuth, Supabase Management API, stateless broker contract, optional Supabase Edge Functions.
 
 ---
 
 ## Verified constraints from the current OpenCode codebase
 
-- Primary install story is `opencode plugin opencode-supabase`. The installer can detect both server and TUI targets and patch both plugin config surfaces in one flow; see `packages/opencode/src/plugin/install.ts:145`, `packages/opencode/src/plugin/install.ts:421`, and `packages/opencode/test/plugin/install.test.ts:112`.
+- `opencode plugin` and external TUI plugin loading through `.opencode/tui.jsonc` require OpenCode `>= 1.3.4`. OpenCode `1.2.27` rejects the `plugin` key in `tui.jsonc`, so `/supabase` cannot be registered there.
+- Manual local-path configuration through `.opencode/opencode.jsonc` and `.opencode/tui.jsonc` remains a supported fallback on compatible OpenCode versions; relative path entries in those files resolve from inside `.opencode/`, not from the consumer repo root; see `packages/opencode/src/config/config.ts:286` and `packages/opencode/src/config/tui.ts:57`.
 - The package must expose separate `./server` and `./tui` entrypoints. TUI loading does not fall back to `main` or `exports["."]`; see `packages/opencode/src/plugin/shared.ts:89`.
 - `/supabase` should remain a TUI slash command. It can open a dialog through the public TUI plugin API; see `packages/plugin/src/tui.ts:389`.
 - The plugin can use the built-in provider OAuth endpoints through `client.provider.oauth.authorize()` and `client.provider.oauth.callback()`; see `packages/opencode/src/cli/cmd/tui/component/dialog-provider.tsx:83` and `packages/opencode/src/cli/cmd/tui/component/dialog-provider.tsx:145`.
@@ -30,12 +31,22 @@
 - Additional hardening donor: `.worktrees/supabase/packages/opencode/src/mcp/oauth-callback.ts` for state-keyed pending auth management and port-in-use handling.
 - Treat all donor line numbers in this plan as starting points, but prefer these verified files over older assumptions when extraction details conflict.
 
+## Superseding auth decision (2026-04-06)
+
+- Supabase's current Management API OAuth App docs continue to show `client_secret` authentication at `POST https://api.supabase.com/v1/oauth/token`.
+- That invalidates the earlier assumption that this plugin could complete the documented Management API OAuth flow as a pure public `client_id`-only PKCE client.
+- The extracted plugin must not hold or ship `client_secret`.
+- Therefore the live auth flow pivots to a stateless broker that holds `client_secret` server-side and exposes only exchange and refresh endpoints.
+- The broker contract in `docs/supabase-oauth-broker-contract.md` is the source of truth for that boundary.
+
 ## Assumptions
 
 - Keep the provider id as `"supabase"` so the TUI plugin can call `provider.oauth.authorize({ providerID: "supabase", method: 0 })`.
 - Keep `/supabase` as a dedicated TUI slash command. Do not add custom server routes or first-class server CLI commands.
-- Do not ship hardcoded OAuth client credentials. Target a public PKCE OAuth flow with `client_id` only. Read `client_id` and callback port from plugin options with env fallback.
-- Assume Supabase can support the required public PKCE client flow, but validate the exact token exchange requirements before copying the prototype's exchange code because the donor currently uses a confidential-client secret.
+- Do not ship hardcoded OAuth client secrets in the plugin. Keep the Supabase OAuth App `client_secret` only in the external broker deployment.
+- The plugin should continue to use a public `client_id`, but treat it as an OpenCode-managed public identifier rather than a BYO credential.
+- The plugin owns `state`, PKCE `code_verifier`, the local callback server, browser-open behavior, and plugin-owned token persistence.
+- The broker stays deliberately dumb and stateless: it exposes only exchange and refresh endpoints, stores no user tokens, and does not own the browser callback.
 - Keep `supabase_login` as a fallback tool, but treat `/supabase` as the primary user-facing login flow.
 
 ## Architecture fit and tradeoffs
@@ -52,12 +63,13 @@
 - The feature spans two runtimes, so TUI login UX and server-side tool execution must stay coordinated.
 - Browser auto-open can fail on some systems, so the dialog needs a visible manual fallback path.
 - True concurrent Supabase OAuth flows are out of scope because host pending OAuth state is keyed by provider id.
-- The prototype uses a secret-based token exchange, so the extracted public-client PKCE flow needs fresh validation instead of a literal port.
+- Supabase Management API OAuth Apps require a confidential token-exchange step, so turnkey login now depends on a small hosted broker in addition to the plugin package.
 
 ### Recommendation
 
 - Follow the external dual-target design.
 - Treat plugin-owned token storage as a first-class requirement, not a workaround to add later.
+- Keep the broker contract stateless and narrow: no broker-owned callback, no token storage, and no Management API proxy.
 - Start with the visible success outcome in TUI and defer any deeper host refresh/bootstrap parity work to later research if the public plugin APIs prove insufficient.
 - Deliver the feature in phases so each phase yields a concrete testable milestone.
 
@@ -73,6 +85,7 @@ opencode-supabase/
       cfg.ts
       oauth.ts
       api.ts
+      broker.ts
       types.ts
     server/
       index.ts
@@ -90,6 +103,25 @@ opencode-supabase/
 - The repo has already been initialized with `git init` and `bun init -y`.
 - Current starter files are `.gitignore`, `CLAUDE.md`, `README.md`, `index.ts`, `package.json`, `tsconfig.json`, and `bun.lock`.
 - Task 1 should reshape this Bun starter scaffold into the dual-target plugin package rather than assuming a completely blank folder.
+
+## Current progress snapshot (2026-04-06)
+
+- Phase 1 is complete: the package is dual-target, install docs exist, and `/supabase` opens through the TUI plugin.
+- Phase 2 happy-path OAuth is complete: `/supabase` opens the browser, the local callback succeeds, the plugin exchanges through the broker, plugin-owned auth is persisted, and OpenCode now shows the success outcome instead of a false denial.
+- The reference broker implementation is functionally complete for v1 exchange and refresh, including local Supabase Edge Function serving, request validation, upstream normalization, and local setup docs.
+- The active next milestone is Phase 3 / Task 8: implement the first real authenticated Supabase Management API tool and prove restart persistence plus tool-time auth reuse.
+
+### Verified implementation findings that supersede earlier assumptions
+
+- The local plugin callback must use `http://localhost:<port>/auth/callback`, not `127.0.0.1`, because Supabase allows plain HTTP loopback for `localhost` but rejected `127.0.0.1` in real testing.
+- Supabase local Edge Function serving passes a function-prefixed path like `/opencode-supabase-broker/exchange`, so broker routing must normalize prefixed paths instead of matching only exact `/exchange` and `/refresh`.
+- The TUI-side `provider.oauth.callback(...)` flow must treat callback success according to the real SDK/client contract used at runtime. The implementation now handles the callback acknowledgment path correctly and no longer assumes a fake `{ type: "success" }` response shape from the TUI client surface.
+- The broker contract doc and current broker implementation still differ on internal/config failure responses: the implementation returns generic `500 server_error` JSON for those cases, while the contract doc still recommends only `400/401/429/502`. Keep this mismatch visible until reconciled.
+
+### Active focus
+
+- Do not spend more time on happy-path OAuth plumbing unless a new regression appears.
+- Prioritize Task 8 next.
 
 ## Donor mapping
 
@@ -111,10 +143,14 @@ Execute this plan in phases. Do not start a later phase until the current phase 
 
 ### Cross-phase constraints
 
-- Primary install story is `opencode plugin opencode-supabase`.
+- Primary install story for this phase is `opencode plugin ../../opencode-supabase` from a consumer repo on OpenCode `>= 1.3.4`.
+- Manual local-path configuration through `.opencode/opencode.jsonc` and `.opencode/tui.jsonc` is the fallback path when CLI install is not desired.
+- Manual verification for this phase requires an OpenCode host version with `opencode plugin` and TUI plugin support in `tui.jsonc` (`>= 1.3.4`).
 - The package must remain one npm package with separate `./server` and `./tui` entrypoints.
 - Keep provider id exactly `supabase`.
-- Do not rely on a `client_secret`; the target OAuth flow is public PKCE with `client_id` only.
+- Do not rely on a `client_secret` inside the plugin repo; the live OAuth flow depends on an external broker that holds it server-side.
+- Keep the plugin-side OAuth responsibilities local: authorize URL creation, PKCE, `state`, callback handling, and local token persistence.
+- From Task 6 onward, end-to-end OAuth verification requires a reachable broker implementation that matches `docs/supabase-oauth-broker-contract.md`.
 - Do not add custom HTTP routes.
 - Do not try to integrate Supabase into the stock provider picker.
 - Browser auto-open is a plugin responsibility. If it fails, the dialog must still show the URL and clear instructions.
@@ -126,12 +162,14 @@ Execute this plan in phases. Do not start a later phase until the current phase 
 
 **Goal:** Prove packaging and command registration before implementing OAuth.
 
+**Status:** Completed on 2026-04-06.
+
 **Covers:** Task 1, Task 2, and Task 3.
 
 **Deliverable:**
 
-- `opencode plugin opencode-supabase` works
-- local development install works
+- CLI installation from a consumer repo works
+- manual local-path configuration works as a fallback
 - both plugin targets load
 - `/supabase` exists and opens a dialog shell
 - dialog open and close behavior works cleanly
@@ -140,16 +178,18 @@ Execute this plan in phases. Do not start a later phase until the current phase 
 
 1. `bun install`
 2. `bun run typecheck`
-3. `opencode plugin ../opencode-supabase` or `opencode plugin opencode-supabase`
-4. Start OpenCode
+3. In a separate consumer repo on OpenCode `>= 1.3.4`, run `opencode plugin ../../opencode-supabase`
+4. Start OpenCode from the consumer repo
 5. Run `/supabase`
 6. Confirm the dialog opens and closes without loader or runtime errors
-7. Confirm both plugin config surfaces under `.opencode/` were patched for a local happy-path install
+7. Confirm both config surfaces were patched by the CLI install
+8. Optional fallback verification: configure `../../opencode-supabase` manually in `.opencode/opencode.jsonc` and `.opencode/tui.jsonc`
+9. Confirm the same plugin loads through manual config too
 
 **Exit criteria:**
 
-- dual-target package resolution works
-- install path works through the CLI plugin installer
+- dual-target package resolution works through CLI install
+- both config surfaces load the plugin correctly
 - `/supabase` is visible and interactive
 
 **Deferred:** real OAuth, browser open behavior, token persistence, real Supabase API calls
@@ -157,6 +197,8 @@ Execute this plan in phases. Do not start a later phase until the current phase 
 ### Phase 2: Browser OAuth happy path
 
 **Goal:** Make `/supabase` perform the real OAuth flow and finish with clear success confirmation.
+
+**Status:** Completed on 2026-04-06.
 
 **Covers:** Task 4, Task 5, Task 6, and Task 7.
 
@@ -175,7 +217,7 @@ Execute this plan in phases. Do not start a later phase until the current phase 
 **Manual verification:**
 
 1. `bun run typecheck`
-2. Install the plugin with `opencode plugin ...`
+2. Install the plugin from a consumer repo using `opencode plugin ../../opencode-supabase`
 3. Start OpenCode
 4. Run `/supabase`
 5. Confirm the plugin attempts to open the browser
@@ -185,6 +227,14 @@ Execute this plan in phases. Do not start a later phase until the current phase 
 9. Confirm the in-app success message appears and mentions next actions
 10. Restart OpenCode
 11. Confirm `/supabase` no longer behaves like a first-run disconnected shell
+
+**Implementation note:**
+
+- Do not attempt direct token exchange from the plugin against Supabase Management API OAuth endpoints. Task 6 and Task 7 must pivot to the broker contract in `docs/supabase-oauth-broker-contract.md` for exchange and Task 9 must use the same boundary for refresh.
+- Real implementation follow-up notes from this phase:
+  - the callback host needed to be `localhost`, not `127.0.0.1`
+  - the broker needed to accept function-prefixed Edge Function paths during local serve
+  - the TUI callback success path needed to match the real runtime callback acknowledgment shape
 
 **Exit criteria:**
 
@@ -198,6 +248,8 @@ Execute this plan in phases. Do not start a later phase until the current phase 
 ### Phase 3: First authenticated Supabase tool
 
 **Goal:** Prove that persisted plugin-owned auth can power one real management tool after restart.
+
+**Status:** Current active milestone.
 
 **Covers:** Task 8.
 
@@ -227,6 +279,8 @@ Execute this plan in phases. Do not start a later phase until the current phase 
 ### Phase 4: Remaining tool surface plus token lifecycle handling
 
 **Goal:** Finish the management tool set and make auth refresh and failure paths reliable.
+
+**Status:** Not started.
 
 **Covers:** Task 9.
 
@@ -258,6 +312,8 @@ Execute this plan in phases. Do not start a later phase until the current phase 
 
 **Goal:** Make the plugin easy to install, verify, and hand off.
 
+**Status:** Partially started, but not complete until at least one real tool exists and README verification is re-run end to end.
+
 **Covers:** Task 10.
 
 **Deliverable:**
@@ -270,7 +326,7 @@ Execute this plan in phases. Do not start a later phase until the current phase 
 **Manual verification:**
 
 1. Follow the README from scratch in a clean setup
-2. Install with `opencode plugin opencode-supabase` or local path
+2. Configure the plugin from a clean consumer repo using local path entries in `.opencode/opencode.jsonc` and `.opencode/tui.jsonc`
 3. Start OpenCode
 4. Run `/supabase`
 5. Complete login
@@ -285,8 +341,10 @@ Execute this plan in phases. Do not start a later phase until the current phase 
 
 ## Recommended execution order
 
+Current recommended next step: Task 8.
+
 1. Task 1: Scaffold the dual-target package
-2. Task 2: Make install work with one `opencode plugin` command
+2. Task 2: Make CLI install work with manual config as a fallback
 3. Task 3: Recreate `/supabase` as a dialog shell
 4. Task 4: Split shared OAuth, API, and config code
 5. Task 5: Add plugin-owned auth persistence
@@ -362,7 +420,7 @@ export default { id: "supabase", tui };
 - `bun install`
 - `bun run typecheck`
 
-## Task 2: Make install work with one `opencode plugin` command
+## Task 2: Make CLI install work with manual config as a fallback
 
 **Files:**
 
@@ -370,33 +428,41 @@ export default { id: "supabase", tui };
 - Modify: `README.md`
 - Reference: `packages/opencode/src/plugin/install.ts:145`
 - Reference: `packages/opencode/src/plugin/install.ts:421`
-- Reference: `packages/opencode/src/cli/cmd/plug.ts:70`
 - Reference: `packages/opencode/test/plugin/install.test.ts:112`
+- Reference: `packages/opencode/src/config/config.ts:286`
+- Reference: `packages/opencode/src/config/tui.ts:57`
 
 **Steps**
 
 1. Keep the published package name stable as `opencode-supabase`.
-2. Ensure the package manifest exposes both plugin targets so installer target detection sees both.
+2. Ensure the package manifest exposes both plugin targets so CLI install and config-based loading can resolve both.
 3. Document the primary install path as:
 
 ```bash
-opencode plugin opencode-supabase
+opencode plugin ../../opencode-supabase
 ```
 
-4. Document local development install as:
+4. Document manual local-path configuration as the fallback path.
+5. Document that the same plugin spec must be added to both `.opencode/opencode.jsonc` and `.opencode/tui.jsonc` for the fallback flow.
+6. Use a consumer-repo-relative example path such as:
 
-```bash
-opencode plugin ../opencode-supabase
+```json
+{
+  "plugin": ["../../opencode-supabase"]
+}
 ```
 
-5. Explain that the CLI installer patches both server and TUI plugin config surfaces under `.opencode/`.
-6. Do not document manual `opencode.jsonc`-only install as the primary path.
+7. Explain that this manual path is resolved relative to the `.opencode/` directory, not the consumer repo root, so a sibling checkout usually needs `../../opencode-supabase`.
+8. Explain that server and TUI load from separate config surfaces, so both files must be configured for the manual fallback.
+9. Do not document manual `opencode.jsonc`-only install as sufficient for the full Phase 1 flow.
 
 **Verification**
 
 - `bun run typecheck`
-- local path install with `opencode plugin ../opencode-supabase`
-- confirm both server and TUI plugin config surfaces under `.opencode/` were updated
+- run `opencode plugin ../../opencode-supabase` from a consumer repo on OpenCode `>= 1.3.4`
+- confirm both config surfaces were patched
+- start OpenCode from the consumer repo and confirm both targets load
+- optional fallback: add the plugin path to both config surfaces manually and confirm the same result
 
 ## Task 3: Recreate `/supabase` as a dialog shell
 
@@ -424,6 +490,7 @@ opencode plugin ../opencode-supabase
 **Verification**
 
 - `bun run typecheck`
+- `bun test test/plugin-exports.test.ts`
 - start OpenCode
 - run `/supabase`
 - confirm the dialog opens and closes without errors
@@ -443,12 +510,18 @@ opencode plugin ../opencode-supabase
 **Steps**
 
 1. Move pure OAuth helpers into `src/shared/oauth.ts`.
-2. Move token exchange and refresh helpers into `src/shared/api.ts`, but rewrite them for the public PKCE client flow rather than copying the prototype's Basic-auth secret exchange literally.
+2. Move Management API HTTP helpers into `src/shared/api.ts`. Keep auth exchange and refresh logic isolated so later tasks can move it behind a broker-backed boundary instead of copying the prototype's Basic-auth secret exchange literally.
 3. Create `src/shared/cfg.ts` that reads plugin options and env vars into one normalized config object.
-4. Replace hardcoded client values with config-driven values. Do not carry forward the prototype `CLIENT_SECRET`.
-5. Validate the exact Supabase authorize and token exchange requirements for a public client before implementing the final request payloads.
+4. Replace secret-bearing prototype values with broker-aware config and a public-client identifier. Do not carry forward the prototype `CLIENT_SECRET`.
+5. Validate the exact Supabase authorize requirements and leave room for a later broker-backed exchange step rather than hard-coding a direct token exchange assumption here.
 6. Keep shared API endpoints as constants in shared code.
-7. Fail fast if required `client_id` or port configuration is missing.
+7. Fail fast if callback port configuration is missing or invalid, and keep public `client_id` lookup isolated so later tasks can swap from override-based config to a built-in default cleanly.
+
+**Task 4 note:**
+
+- This task extracts reusable authorize, config, and Management API helpers only.
+- The live token exchange and refresh path is no longer expected to happen directly from the plugin.
+- Task 6 and Task 9 should move those confidential token operations behind the broker contract in `docs/supabase-oauth-broker-contract.md`.
 
 **Verification**
 
@@ -487,12 +560,15 @@ type Saved = {
 
 - `bun run typecheck`
 
-## Task 6: Rebuild the auth hook around public plugin APIs
+## Task 6: Rebuild the auth hook around public plugin APIs and broker-backed exchange
 
 **Files:**
 
+- Create: `src/shared/broker.ts`
 - Create: `src/server/auth.ts`
 - Modify: `src/server/index.ts`
+- Modify: `src/shared/cfg.ts`
+- Reference: `docs/supabase-oauth-broker-contract.md`
 - Reference: `packages/plugin/src/index.ts:56`
 - Reference: `packages/opencode/src/provider/auth.ts:165`
 - Reference: `packages/opencode/src/server/routes/provider.ts:87`
@@ -518,11 +594,12 @@ auth: {
 }
 ```
 
-3. Keep the browser-based flow: start a local callback server, build the authorize URL, and return `{ url, instructions, method: "auto", callback }`.
+3. Keep the browser-based flow: start a local callback server, build the authorize URL locally, and return `{ url, instructions, method: "auto", callback }`.
 4. Replace any single global pending OAuth object in plugin code with a state-keyed map. Use `packages/opencode/src/mcp/oauth-callback.ts` as a hardening reference for pending-state handling and port-in-use checks.
 5. Move HTML success and error responses into `src/server/auth.ts`.
-6. In the callback, exchange the code for tokens via the validated public PKCE flow, write them to `src/server/store.ts`, and return `{ type: "success", access, refresh, expires }` so OpenCode persists provider auth too.
-7. Do not add custom HTTP routes.
+6. Create `src/shared/broker.ts` for the broker HTTP client. It should implement only the contract in `docs/supabase-oauth-broker-contract.md`, not a generic proxy client, and it should read the broker base URL through one isolated config lookup so an official default and local-development override can coexist cleanly.
+7. In the callback, exchange the code by calling broker `POST /exchange` with `code`, `code_verifier`, and `redirect_uri`, then write the returned tokens to `src/server/store.ts`, and return `{ type: "success", access, refresh, expires }` so OpenCode persists provider auth too.
+8. Do not add custom HTTP routes.
 
 **Verification**
 
@@ -557,7 +634,8 @@ auth: {
 
 5. Do not assume the public TUI plugin API can force the same internal sync refresh used by the built-in provider dialog. Focus on the required visible outcome: automatic close plus success confirmation.
 6. Keep the rendered dialog intentionally simple: title, browser-opening status, manual URL fallback, waiting state, and clear error handling.
-7. Research any stronger post-auth refresh/bootstrap behavior separately after the simple happy path is working. Do not block phase completion on internal parity with host dialogs.
+7. Treat broker failures as auth failures in the dialog surface. Do not leak raw broker transport details into the default user-facing copy.
+8. Research any stronger post-auth refresh/bootstrap behavior separately after the simple happy path is working. Do not block phase completion on internal parity with host dialogs.
 
 **Verification**
 
@@ -582,7 +660,7 @@ auth: {
 
 1. Create one narrow vertical slice first.
 2. Implement `supabase_list_projects` unless extraction reveals `supabase_list_organizations` is materially simpler.
-3. Add one shared helper in `src/server/tools.ts` to read saved auth and refresh if expired.
+3. Add one shared helper in `src/server/tools.ts` to read saved auth and refresh through the broker if expired.
 4. Add one shared HTTP helper for Supabase Management API calls.
 5. When no auth exists, fail with a clear message telling the user to run `/supabase` first.
 6. Prove the tool uses persisted plugin-owned auth, not a temporary in-memory value.
@@ -616,7 +694,7 @@ auth: {
 - `supabase_get_project_api_keys`
 
 2. Keep the existing argument names from the prototype where possible.
-3. Update the shared auth helper so expired access tokens refresh automatically.
+3. Update the shared auth helper so expired access tokens refresh automatically via broker `POST /refresh`.
 4. When refresh succeeds, update both plugin-owned store and host auth via `input.client.auth.set("supabase", ...)`.
 5. When refresh fails with an auth error, clear both storage locations and return a clear reconnect instruction.
 6. Keep response behavior simple: formatted JSON on success and clear upstream-aware errors on failure.
@@ -648,19 +726,24 @@ auth: {
 2. Show the primary install path as:
 
 ```bash
-opencode plugin opencode-supabase
+opencode plugin ../../opencode-supabase
 ```
 
-3. Show the local development install path as:
+3. Show the optional manual install fallback as:
 
-```bash
-opencode plugin ../opencode-supabase
+```json
+{
+  "plugin": ["../../opencode-supabase"]
+}
 ```
 
-4. Document required config in this priority order:
+and state that the same local path entry must be added to both `.opencode/opencode.jsonc` and `.opencode/tui.jsonc` in a consumer repo.
 
-- plugin options for `client_id`, `port`
-- env vars as fallback
+4. Document auth configuration in this priority order:
+
+- built-in OpenCode-managed public `client_id`
+- plugin options or env vars for callback port if the callback listener remains configurable
+- optional broker URL override only if local development support exposes one
 
 5. Decide whether prototype cleanup is a separate follow-up or explicitly deferred.
 6. If cleanup happens, keep it in a separate commit from the external plugin implementation.
@@ -684,7 +767,9 @@ opencode plugin ../opencode-supabase
 - Do not assume browser auto-open will always succeed.
 - Do not promise multiple simultaneous Supabase OAuth sessions.
 - Do not ship hardcoded client secrets.
-- Do not copy the prototype's secret-based token exchange blindly; revalidate Supabase public PKCE requirements first.
+- Do not move browser callback ownership into the broker.
+- Do not turn the broker into a generic Supabase API proxy.
+- Do not bypass the broker for exchange or refresh on the Management API OAuth flow.
 
 ## Out of scope by design
 
@@ -698,7 +783,7 @@ opencode plugin ../opencode-supabase
 
 1. `bun install`
 2. `bun run typecheck`
-3. `opencode plugin ../opencode-supabase` or `opencode plugin opencode-supabase`
+3. Configure the plugin from a consumer repo via `.opencode/opencode.jsonc` and `.opencode/tui.jsonc`
 4. Start OpenCode
 5. Run `/supabase`
 6. Confirm browser open is attempted and manual fallback is visible if needed
