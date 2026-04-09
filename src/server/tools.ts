@@ -50,9 +50,12 @@ function isRefreshNeeded(auth: SavedAuth) {
 }
 
 function generateRandomString(length: number) {
-  return Array.from(crypto.getRandomValues(new Uint8Array(length)), (value) =>
-    (value % 36).toString(36),
-  ).join("");
+  const bytes = crypto.getRandomValues(new Uint8Array(length));
+  return btoa(String.fromCharCode(...bytes))
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "")
+    .slice(0, length);
 }
 
 async function executeSupabaseRequest(
