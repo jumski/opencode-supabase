@@ -43,9 +43,10 @@ type SupabaseToolContext = Pick<
 >;
 
 const NOT_CONNECTED_MESSAGE = "Supabase is not connected. Run /supabase first.";
+const REFRESH_BUFFER_MS = 30_000;
 
-function isExpired(auth: SavedAuth) {
-  return auth.expires <= Date.now();
+function isRefreshNeeded(auth: SavedAuth) {
+  return auth.expires <= Date.now() + REFRESH_BUFFER_MS;
 }
 
 async function executeSupabaseGet(
@@ -94,7 +95,10 @@ async function clearHostAuth(
   fetchImpl: FetchLike,
 ) {
   const url = new URL(`/auth/supabase?directory=${encodeURIComponent(input.directory)}`, input.serverUrl);
-  await fetchImpl(url.toString(), { method: "DELETE" });
+  const response = await fetchImpl(url.toString(), { method: "DELETE" });
+  if (!response.ok) {
+    throw new Error(`Failed to clear host auth: ${response.status}`);
+  }
 }
 
 export async function ensureSupabaseToolAuth(
@@ -108,7 +112,7 @@ export async function ensureSupabaseToolAuth(
     throw new Error(NOT_CONNECTED_MESSAGE);
   }
 
-  if (!isExpired(saved.auth)) {
+  if (!isRefreshNeeded(saved.auth)) {
     return saved.auth;
   }
 
@@ -127,12 +131,16 @@ export async function ensureSupabaseToolAuth(
       expires: Date.now() + (refreshed.expires_in ?? 3600) * 1000,
     };
     await writeSavedAuth(input, nextAuth);
-    await setHostAuth(input, nextAuth);
+    try {
+      await setHostAuth(input, nextAuth);
+    } catch {}
     return nextAuth;
   } catch (error) {
     if (error instanceof BrokerClientError && (error.status === 401 || error.status === 400)) {
       await clearSavedAuth(input);
-      await clearHostAuth(input, fetchImpl);
+      try {
+        await clearHostAuth(input, fetchImpl);
+      } catch {}
       throw new Error(NOT_CONNECTED_MESSAGE);
     }
 
