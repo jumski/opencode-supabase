@@ -49,12 +49,22 @@ function isRefreshNeeded(auth: SavedAuth) {
   return auth.expires <= Date.now() + REFRESH_BUFFER_MS;
 }
 
-async function executeSupabaseGet(
+function generateRandomString(length: number) {
+  const bytes = crypto.getRandomValues(new Uint8Array(length));
+  return btoa(String.fromCharCode(...bytes))
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "")
+    .slice(0, length);
+}
+
+async function executeSupabaseRequest(
   input: SupabaseToolInput,
   options: PluginOptions | undefined,
   deps: ToolDeps,
   path: string,
   errorLabel: string,
+  init?: RequestInit,
 ) {
   const config = readSupabaseConfig(options);
   const auth = await ensureSupabaseToolAuth(input, options, deps);
@@ -62,7 +72,7 @@ async function executeSupabaseGet(
     config,
     auth.access,
     path,
-    undefined,
+    init,
     deps.fetch,
   );
 
@@ -72,6 +82,16 @@ async function executeSupabaseGet(
   }
 
   return JSON.stringify(await response.json(), null, 2);
+}
+
+async function executeSupabaseGet(
+  input: SupabaseToolInput,
+  options: PluginOptions | undefined,
+  deps: ToolDeps,
+  path: string,
+  errorLabel: string,
+) {
+  return executeSupabaseRequest(input, options, deps, path, errorLabel);
 }
 
 async function setHostAuth(
@@ -184,6 +204,41 @@ export function createSupabaseTools(
           `/projects/${args.project_ref}/api-keys`,
           "get API keys",
         );
+      },
+    }),
+    supabase_create_project: tool({
+      description: "Create a new Supabase project in an organization.",
+      args: {
+        organization_id: tool.schema.string().describe("Organization ID to create the project in"),
+        name: tool.schema.string().describe("Project name"),
+        region: tool.schema.string().describe("Database region").optional(),
+        db_pass: tool.schema.string().describe("Database password").optional(),
+      },
+      async execute(args, _context: SupabaseToolContext) {
+        return executeSupabaseRequest(
+          input,
+          options,
+          deps,
+          "/projects",
+          "create project",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              organization_id: args.organization_id,
+              name: args.name,
+              region: args.region ?? "us-east-1",
+              db_pass: args.db_pass ?? generateRandomString(32),
+            }),
+          },
+        );
+      },
+    }),
+    supabase_login: tool({
+      description: "Explain how to connect Supabase in the TUI.",
+      args: {},
+      async execute(_args, _context: SupabaseToolContext) {
+        return "Supabase login must be completed in the TUI. Run /supabase first.";
       },
     }),
   };

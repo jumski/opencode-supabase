@@ -558,4 +558,150 @@ describe("server tools auth helper", () => {
       tools.supabase_get_project_api_keys.execute({ project_ref: "proj_404" }, createContext(input)),
     ).rejects.toThrow("Failed to get API keys: 404 missing");
   });
+
+  test("creates a project with default region and generated db password", async () => {
+    const { input } = await createInput();
+    process.env.OPENCODE_SUPABASE_BROKER_URL = "https://example.com/broker";
+    await writeSavedAuth(input, {
+      access: "saved-access",
+      refresh: "saved-refresh",
+      expires: Date.now() + 60_000,
+    });
+
+    const fetchMock: FetchLike = mock(async (request, init) => {
+      const url = String(request);
+      expect(url).toBe("https://api.supabase.com/v1/projects");
+      expect(init?.method).toBe("POST");
+      expect(init?.headers).toMatchObject({
+        Authorization: "Bearer saved-access",
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      });
+
+      const body = JSON.parse(String(init?.body)) as {
+        organization_id: string;
+        name: string;
+        region: string;
+        db_pass: string;
+      };
+      expect(body.organization_id).toBe("org_123");
+      expect(body.name).toBe("demo-project");
+      expect(body.region).toBe("us-east-1");
+      expect(body.db_pass.length).toBeGreaterThanOrEqual(24);
+
+      return new Response(JSON.stringify({ id: "proj_new", name: "demo-project" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+
+    const tools = createSupabaseTools(
+      input,
+      {
+        clientId: "plugin-client",
+        oauthPort: 17682,
+      },
+      { fetch: fetchMock },
+    );
+
+    const result = await tools.supabase_create_project.execute(
+      { organization_id: "org_123", name: "demo-project" },
+      createContext(input),
+    );
+
+    expect(result).toContain("proj_new");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  test("creates a project with provided region and db password", async () => {
+    const { input } = await createInput();
+    process.env.OPENCODE_SUPABASE_BROKER_URL = "https://example.com/broker";
+    await writeSavedAuth(input, {
+      access: "saved-access",
+      refresh: "saved-refresh",
+      expires: Date.now() + 60_000,
+    });
+
+    const fetchMock: FetchLike = mock(async (_request, init) => {
+      const body = JSON.parse(String(init?.body)) as {
+        organization_id: string;
+        name: string;
+        region: string;
+        db_pass: string;
+      };
+      expect(body).toEqual({
+        organization_id: "org_999",
+        name: "named-project",
+        region: "eu-west-1",
+        db_pass: "secret-pass",
+      });
+
+      return new Response(JSON.stringify({ id: "proj_custom" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+
+    const tools = createSupabaseTools(
+      input,
+      {
+        clientId: "plugin-client",
+        oauthPort: 17683,
+      },
+      { fetch: fetchMock },
+    );
+
+    const result = await tools.supabase_create_project.execute(
+      {
+        organization_id: "org_999",
+        name: "named-project",
+        region: "eu-west-1",
+        db_pass: "secret-pass",
+      },
+      createContext(input),
+    );
+
+    expect(result).toContain("proj_custom");
+  });
+
+  test("formats create project failures clearly", async () => {
+    const { input } = await createInput();
+    process.env.OPENCODE_SUPABASE_BROKER_URL = "https://example.com/broker";
+    await writeSavedAuth(input, {
+      access: "saved-access",
+      refresh: "saved-refresh",
+      expires: Date.now() + 60_000,
+    });
+
+    const fetchMock: FetchLike = mock(async () => new Response("bad request", { status: 400 }));
+
+    const tools = createSupabaseTools(
+      input,
+      {
+        clientId: "plugin-client",
+        oauthPort: 17684,
+      },
+      { fetch: fetchMock },
+    );
+
+    await expect(
+      tools.supabase_create_project.execute(
+        { organization_id: "org_123", name: "bad-project" },
+        createContext(input),
+      ),
+    ).rejects.toThrow("Failed to create project: 400 bad request");
+  });
+
+  test("supabase_login returns TUI guidance", async () => {
+    const { input } = await createInput();
+
+    const tools = createSupabaseTools(input, {
+      clientId: "plugin-client",
+      oauthPort: 17685,
+    });
+
+    await expect(tools.supabase_login.execute({}, createContext(input))).resolves.toBe(
+      "Supabase login must be completed in the TUI. Run /supabase first.",
+    );
+  });
 });
