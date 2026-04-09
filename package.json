@@ -2,11 +2,16 @@
   "name": "opencode-supabase",
   "version": "0.0.0",
   "type": "module",
+  "main": "./index.ts",
   "private": true,
   "exports": {
     "./server": "./src/server/index.ts",
     "./tui": "./src/tui/index.tsx"
   },
+  "oc-plugin": [
+    "server",
+    "tui"
+  ],
   "scripts": {
     "typecheck": "bunx tsc --noEmit",
     "test": "bun test"
