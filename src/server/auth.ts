@@ -9,33 +9,11 @@ import {
 import { readSupabaseConfig } from "../shared/cfg.ts";
 import { buildAuthorizeUrl, generatePKCE, generateState } from "../shared/oauth.ts";
 import type { FetchLike, SupabaseTokenResponse } from "../shared/types.ts";
+import { HTML_SUCCESS, htmlError } from "./auth-html.ts";
 import { writeSavedAuth } from "./store.ts";
 
 const CALLBACK_PATH = "/auth/callback";
 const CALLBACK_TIMEOUT_MS = 5 * 60 * 1000;
-
-const HTML_SUCCESS = `<!doctype html>
-<html>
-  <head>
-    <title>OpenCode - Supabase Authorization Successful</title>
-  </head>
-  <body>
-    <h1>Authorization Successful</h1>
-    <p>You can close this window and return to OpenCode.</p>
-    <script>setTimeout(() => window.close(), 2000)</script>
-  </body>
-</html>`;
-
-const htmlError = (message: string) => `<!doctype html>
-<html>
-  <head>
-    <title>OpenCode - Supabase Authorization Failed</title>
-  </head>
-  <body>
-    <h1>Authorization Failed</h1>
-    <p>${message}</p>
-  </body>
-</html>`;
 
 type PendingAuth = {
   codeVerifier: string;
