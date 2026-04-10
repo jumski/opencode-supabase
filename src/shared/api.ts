@@ -1,5 +1,6 @@
 export const DEFAULT_SUPABASE_OAUTH_AUTHORIZE_URL = "https://api.supabase.com/v1/oauth/authorize";
 export const DEFAULT_SUPABASE_API_BASE_URL = "https://api.supabase.com/v1";
+export const DEFAULT_SUPABASE_BROKER_URL = "https://iaoxncwzemnfxcdwakzb.supabase.co/functions/v1/opencode-supabase-broker";
 
 import type { FetchLike, SupabaseSharedConfig } from "./types.ts";
 

@@ -31,7 +31,7 @@ describe("shared config", () => {
     });
   });
 
-  test("ignores brokerBaseUrl in plugin options", () => {
+  test("respects brokerBaseUrl in plugin options over env", () => {
     const config = readSupabaseConfig(
       {
         clientId: "plugin-client",
@@ -43,7 +43,7 @@ describe("shared config", () => {
       },
     );
 
-    expect(config.brokerBaseUrl).toBe("https://example.com/env-broker");
+    expect(config.brokerBaseUrl).toBe("https://example.com/plugin-broker");
   });
 
   test("reads values from env when plugin options are absent", () => {
@@ -75,16 +75,16 @@ describe("shared config", () => {
     ).toThrow("Missing required Supabase config: clientId");
   });
 
-  test("fails fast when broker base url is missing", () => {
-    expect(() =>
-      readSupabaseConfig(
-        {
-          clientId: "plugin-client",
-          oauthPort: 1456,
-        },
-        {},
-      ),
-    ).toThrow("Missing required Supabase config: brokerBaseUrl");
+  test("uses default broker base url when not provided", () => {
+    const config = readSupabaseConfig(
+      {
+        clientId: "plugin-client",
+        oauthPort: 1456,
+      },
+      {},
+    );
+
+    expect(config.brokerBaseUrl).toBe("https://iaoxncwzemnfxcdwakzb.supabase.co/functions/v1/opencode-supabase-broker");
   });
 
   test("fails fast when oauth port is missing or invalid", () => {

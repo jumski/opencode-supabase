@@ -144,7 +144,7 @@ export OPENCODE_SUPABASE_OAUTH_PORT=14589
 
 Notes:
 
-- `OPENCODE_SUPABASE_BROKER_URL` is required. There is intentionally no built-in placeholder default.
+- `OPENCODE_SUPABASE_BROKER_URL` is optional. If not provided, defaults to the official OpenCode broker.
 - `OPENCODE_SUPABASE_OAUTH_CLIENT_ID` must match the OAuth app configured for the broker.
 - `OPENCODE_SUPABASE_OAUTH_PORT` controls the local callback URL the plugin listens on.
 - The callback path is `/auth/callback`, so the full local callback URL is `http://localhost:<port>/auth/callback`.
@@ -191,7 +191,7 @@ https://<project-ref>.supabase.co/functions/v1/opencode-supabase-broker/exchange
 https://<project-ref>.supabase.co/functions/v1/opencode-supabase-broker/refresh
 ```
 
-The plugin currently requires a real broker base URL to be configured through `OPENCODE_SUPABASE_BROKER_URL`.
+The plugin uses the official OpenCode broker by default. Override via `OPENCODE_SUPABASE_BROKER_URL` if self-hosting.
 
 ### Request and response shapes
 

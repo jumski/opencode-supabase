@@ -73,7 +73,7 @@ export OPENCODE_SUPABASE_OAUTH_PORT=14589
 
 Notes:
 
-- `OPENCODE_SUPABASE_BROKER_URL` is required.
+- `OPENCODE_SUPABASE_BROKER_URL` is optional. If not provided, defaults to the official OpenCode broker.
 - `OPENCODE_SUPABASE_OAUTH_CLIENT_ID` must match the OAuth app used by the broker.
 - `OPENCODE_SUPABASE_OAUTH_PORT` controls the local callback listener.
 - The callback path is `/auth/callback`.
