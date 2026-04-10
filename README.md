@@ -52,40 +52,6 @@ bun test
 
 For local broker setup and end-to-end auth testing, see `TESTING.md`.
 
-## Advanced Install
-
-If you are working from a local checkout instead of the published plugin name, use an absolute path:
-
-```bash
-opencode plugin /absolute/path/to/opencode-supabase
-```
-
-Sibling checkout example:
-
-```bash
-opencode plugin ../../opencode-supabase
-```
-
-If you wire config manually, set the plugin in both files because server and TUI plugins load separately.
-
-`.opencode/opencode.jsonc`
-
-```json
-{
-  "plugin": ["/absolute/path/to/opencode-supabase"]
-}
-```
-
-`.opencode/tui.jsonc`
-
-```json
-{
-  "plugin": ["/absolute/path/to/opencode-supabase"]
-}
-```
-
-Relative plugin paths are resolved from inside `.opencode/`, not from the consumer repo root.
-
 ## Reference
 
 - Supabase Management API: https://supabase.com/docs/reference/api/introduction
