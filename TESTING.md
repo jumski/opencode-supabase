@@ -1,37 +1,45 @@
-# Local Development and Testing
+# Testing
 
-## Current scope
+Use this guide to verify the local broker, plugin loading, and `/supabase` auth wiring.
 
-This repo is currently testable for:
+## Current Scope
 
-- plugin install/loading
+Testable today:
+
+- plugin install and loading
 - local broker startup
-- plugin to broker OAuth exchange wiring
-- `/supabase` auth flow wiring
+- OAuth redirect and callback wiring
+- code exchange through the broker
 
-This repo does not yet expose a real authenticated tool after login.
+Not included yet:
+
+- a real authenticated Supabase product tool after login
 
 ## Requirements
-
-You need all of the following:
 
 - Bun
 - Supabase CLI
 - OpenCode `>= 1.3.4`
-- a Supabase OAuth app client ID and client secret
+- Supabase OAuth app client ID and client secret
 
-## 1. Broker runtime environment
+## Quick Local Test Flow
 
-These variables are used by the local Supabase Edge Function.
+### Terminal 1: Start the broker
 
-Required:
+Create a local env file from this repo:
+
+```bash
+cp supabase/functions/.env.example supabase/functions/.env
+```
+
+Set real values in `supabase/functions/.env`:
 
 ```bash
 OPENCODE_SUPABASE_OAUTH_CLIENT_ID=<your_supabase_oauth_app_client_id>
 OPENCODE_SUPABASE_OAUTH_CLIENT_SECRET=<your_supabase_oauth_app_client_secret>
 ```
 
-Optional:
+Optional defaults:
 
 ```bash
 OPENCODE_SUPABASE_OAUTH_TOKEN_URL=https://api.supabase.com/v1/oauth/token
@@ -39,31 +47,27 @@ OPENCODE_SUPABASE_ALLOWED_REDIRECT_HOSTS=localhost
 OPENCODE_SUPABASE_ALLOWED_REDIRECT_PATHS=/auth/callback
 ```
 
-Recommended local file:
-
-- `supabase/functions/.env`
-
-Template:
-
-- `supabase/functions/.env.example`
-
-Start the broker locally from this repo:
+Start the broker:
 
 ```bash
 supabase functions serve opencode-supabase-broker --env-file supabase/functions/.env
 ```
 
-Expected local broker base URL:
+Expected local broker URL:
 
 ```text
 http://localhost:54321/functions/v1/opencode-supabase-broker
 ```
 
-## 2. Consumer project / OpenCode environment
+### Terminal 2: Launch OpenCode in a consumer repo
 
-These variables must exist in the shell before launching `opencode` in the consumer project.
+Install the plugin first if you have not already:
 
-Required:
+```bash
+opencode plugin opencode-supabase
+```
+
+Export the required variables before launching OpenCode:
 
 ```bash
 export OPENCODE_SUPABASE_BROKER_URL=http://localhost:54321/functions/v1/opencode-supabase-broker
@@ -71,14 +75,7 @@ export OPENCODE_SUPABASE_OAUTH_CLIENT_ID=<your_supabase_oauth_app_client_id>
 export OPENCODE_SUPABASE_OAUTH_PORT=14589
 ```
 
-Notes:
-
-- `OPENCODE_SUPABASE_BROKER_URL` is optional. If not provided, defaults to the official OpenCode broker.
-- `OPENCODE_SUPABASE_OAUTH_CLIENT_ID` must match the OAuth app used by the broker.
-- `OPENCODE_SUPABASE_OAUTH_PORT` controls the local callback listener.
-- The callback path is `/auth/callback`.
-
-Full default callback example:
+The callback URL is:
 
 ```text
 http://localhost:14589/auth/callback
@@ -86,81 +83,29 @@ http://localhost:14589/auth/callback
 
 Your Supabase OAuth app must allow that redirect URI.
 
-## Install the plugin in another repo
-
-Preferred install uses an absolute path:
-
-```bash
-opencode plugin /absolute/path/to/opencode-supabase
-```
-
-Manual config with absolute paths:
-
-`.opencode/opencode.jsonc`
-
-```json
-{
-  "plugin": ["/absolute/path/to/opencode-supabase"]
-}
-```
-
-`.opencode/tui.jsonc`
-
-```json
-{
-  "plugin": ["/absolute/path/to/opencode-supabase"]
-}
-```
-
-If you use relative paths, they are resolved from `.opencode/`, not from the consumer repo root.
-
-## Local test flow
-
-### Terminal 1 - broker
-
-In this repo:
-
-```bash
-cp supabase/functions/.env.example supabase/functions/.env
-```
-
-Fill in real secrets in `supabase/functions/.env`, then run:
-
-```bash
-supabase functions serve opencode-supabase-broker --env-file supabase/functions/.env
-```
-
-### Terminal 2 - consumer repo
-
-Export the required variables:
-
-```bash
-export OPENCODE_SUPABASE_BROKER_URL=http://localhost:54321/functions/v1/opencode-supabase-broker
-export OPENCODE_SUPABASE_OAUTH_CLIENT_ID=<your_supabase_oauth_app_client_id>
-export OPENCODE_SUPABASE_OAUTH_PORT=14589
-```
-
-Go to the consumer repo, launch OpenCode, then run:
+Then launch OpenCode and run:
 
 ```text
 /supabase
 ```
 
-## What successful testing means today
+After auth starts, ask your agent about Supabase-related capabilities to confirm the plugin is active in the session.
 
-Right now, success means:
+## Success Means
 
-- broker starts locally
-- plugin loads in the consumer repo
-- `/supabase` starts the browser auth flow
-- callback returns to the local plugin server
-- code exchange goes through the broker successfully
+Successful testing today means:
 
-It does not yet mean a real authenticated product tool is available afterward.
+- the broker starts locally
+- the plugin loads in the consumer repo
+- `/supabase` opens the browser auth flow
+- the callback reaches the local plugin server
+- the broker completes the code exchange
+
+It does not yet mean a full authenticated Supabase tool is available afterward.
 
 ## Verification
 
-From this repo:
+From this repo, run:
 
 ```bash
 bun run typecheck
@@ -174,7 +119,7 @@ Expected result:
 
 ## Troubleshooting
 
-Missing broker URL in the plugin shell:
+Missing broker URL in the OpenCode shell:
 
 ```bash
 export OPENCODE_SUPABASE_BROKER_URL=http://localhost:54321/functions/v1/opencode-supabase-broker
@@ -192,15 +137,10 @@ Missing plugin callback port:
 export OPENCODE_SUPABASE_OAUTH_PORT=14589
 ```
 
-Broker fails with generic `500`:
+Broker returns a generic `500`:
 
-- verify `supabase/functions/.env` contains valid values for:
-  - `OPENCODE_SUPABASE_OAUTH_CLIENT_ID`
-  - `OPENCODE_SUPABASE_OAUTH_CLIENT_SECRET`
+- verify `supabase/functions/.env` contains valid values for `OPENCODE_SUPABASE_OAUTH_CLIENT_ID` and `OPENCODE_SUPABASE_OAUTH_CLIENT_SECRET`
 
 Redirect rejected:
 
-- verify all three match:
-  - OAuth app redirect URI
-  - plugin callback URI
-  - broker allowlist
+- verify the OAuth app redirect URI, plugin callback URI, and broker allowlist all match
