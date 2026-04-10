@@ -4,6 +4,8 @@ import {
   DEFAULT_SUPABASE_API_BASE_URL,
   DEFAULT_SUPABASE_BROKER_URL,
   DEFAULT_SUPABASE_OAUTH_AUTHORIZE_URL,
+  DEFAULT_SUPABASE_OAUTH_CLIENT_ID,
+  DEFAULT_SUPABASE_OAUTH_PORT,
 } from "./api.ts";
 import type { SupabaseEnv, SupabaseSharedConfig } from "./types.ts";
 
@@ -23,13 +25,6 @@ function readPortOption(options: PluginOptions | undefined, key: string) {
   return undefined;
 }
 
-function requireString(value: string | undefined, key: string) {
-  if (!value) {
-    throw new Error(`Missing required Supabase config: ${key}`);
-  }
-  return value;
-}
-
 function requirePort(value: number | string | undefined) {
   if (value === undefined) {
     throw new Error("Missing required Supabase config: oauthPort");
@@ -47,15 +42,19 @@ export function readSupabaseConfig(
   options: PluginOptions | undefined,
   env: SupabaseEnv = process.env,
 ): SupabaseSharedConfig {
-  const clientId = requireString(
-    readStringOption(options, "clientId") ?? env.OPENCODE_SUPABASE_OAUTH_CLIENT_ID,
-    "clientId",
-  );
+  const clientId =
+    readStringOption(options, "clientId") ??
+    readEnvString(env.OPENCODE_SUPABASE_OAUTH_CLIENT_ID) ??
+    DEFAULT_SUPABASE_OAUTH_CLIENT_ID;
   const oauthPort = requirePort(
-    readPortOption(options, "oauthPort") ?? env.OPENCODE_SUPABASE_OAUTH_PORT,
+    readPortOption(options, "oauthPort") ??
+    env.OPENCODE_SUPABASE_OAUTH_PORT ??
+    DEFAULT_SUPABASE_OAUTH_PORT,
   );
   const brokerBaseUrl =
-    readStringOption(options, "brokerBaseUrl") ?? readEnvString(env.OPENCODE_SUPABASE_BROKER_URL) ?? DEFAULT_SUPABASE_BROKER_URL;
+    readStringOption(options, "brokerBaseUrl") ??
+    readEnvString(env.OPENCODE_SUPABASE_BROKER_URL) ??
+    DEFAULT_SUPABASE_BROKER_URL;
 
   return {
     clientId,
