@@ -1,7 +1,5 @@
 # opencode-supabase
 
-[![Supabase](https://img.shields.io/badge/Supabase-Management%20API-3ECF8E?logo=supabase&logoColor=white)](https://supabase.com/)
-
 ![opencode-supabase screenshot](assets/screenshot.png)
 
 OpenCode plugin for Supabase workflows, with OAuth wiring through a broker plus separate server and TUI entrypoints.
