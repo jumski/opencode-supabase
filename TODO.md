@@ -30,18 +30,18 @@ This branch provides functional OAuth plumbing and broker integration. The items
 
 ## Productize config defaults
 
-**Current state:** Requires manual configuration of `OPENCODE_SUPABASE_OAUTH_CLIENT_ID` and `OPENCODE_SUPABASE_BROKER_URL`.
+**Current state:** Only `OPENCODE_SUPABASE_OAUTH_CLIENT_ID` requires manual configuration. `OPENCODE_SUPABASE_BROKER_URL` now has a default pointing to the official OpenCode broker.
 
 **Issue:** Not turnkey for end users; still scaffold/developer setup.
 
-**Solution options:**
-- Add official/default broker URL
+**Remaining solution options:**
 - Add built-in public client ID managed by OpenCode
 - Or explicitly document this as internal/dev-only for now
 
 **Files to modify:**
-- `src/shared/cfg.ts` (lines 45, 52)
-- `README.md` (lines 137-148)
+- `src/shared/cfg.ts` (line 46)
+- `README.md` (line 147)
+- `TESTING.md` (line 76)
 
 ## Implement remaining tool surface
 
