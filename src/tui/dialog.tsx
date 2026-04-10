@@ -38,7 +38,9 @@ export function SupabaseDialog(props: SupabaseDialogProps) {
 
       // Handle the response shape from the plugin API
       if (authResponse.error) {
-        throw new Error(authResponse.error.message || "Failed to start OAuth authorization");
+        throw new Error(
+          authResponse.error.message || "Failed to start OAuth authorization",
+        );
       }
 
       const authData = authResponse.data;
@@ -69,7 +71,9 @@ export function SupabaseDialog(props: SupabaseDialogProps) {
       })) as unknown as ApiResponse<boolean>;
 
       if (callbackResponse.error) {
-        throw new Error(callbackResponse.error.message || "OAuth callback failed");
+        throw new Error(
+          callbackResponse.error.message || "OAuth callback failed",
+        );
       }
 
       const callbackSucceeded = callbackResponse.data === true;
@@ -78,14 +82,16 @@ export function SupabaseDialog(props: SupabaseDialogProps) {
         setState({ type: "success" });
         props.api.ui.toast({
           variant: "success",
-          message: "Connected to Supabase. Management tools coming in next update.",
+          message:
+            "Connected to Supabase! Tools are ready to use. Ask your agent about supabase.",
         });
         props.onClose();
       } else {
         throw new Error("OAuth authorization was denied");
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Authorization failed";
+      const message =
+        error instanceof Error ? error.message : "Authorization failed";
       setState({ type: "error", message });
       props.api.ui.toast({
         variant: "error",
