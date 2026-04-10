@@ -27,23 +27,6 @@ Connect your account and ask your agent about Supabase capabilities.
 - **Get** project API keys
 - **Create** new Supabase projects
 
-## Development
-
-Install dependencies:
-
-```bash
-bun install
-```
-
-Run checks:
-
-```bash
-bun run typecheck
-bun test
-```
-
-For local broker setup and end-to-end auth testing, see `TESTING.md`.
-
 ## Reference
 
 - Supabase Management API: https://supabase.com/docs/reference/api/introduction
