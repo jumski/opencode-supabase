@@ -14,8 +14,9 @@ opencode plugin opencode-supabase
 
 Then:
 
-1. run `/supabase`
-2. ask your agent what Supabase-related capabilities are available
+1. launch `opencode` in your project
+2. run `/supabase`
+3. ask your agent what Supabase-related capabilities are available
 
 ## What You Can Use
 
