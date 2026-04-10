@@ -1,13 +1,23 @@
 {
   "name": "opencode-supabase",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "type": "module",
+  "description": "OpenCode plugin for Supabase integration with server and TUI components",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jumski/opencode-supabase.git"
+  },
   "main": "./index.ts",
-  "private": true,
   "exports": {
     "./server": "./src/server/index.ts",
     "./tui": "./src/tui/index.tsx"
   },
+  "files": [
+    "src/",
+    "index.ts",
+    "README.md"
+  ],
   "oc-plugin": [
     "server",
     "tui"

@@ -1,0 +1,22 @@
+# Files to exclude from npm publish
+
+# Development files
+test/
+docs/
+supabase/
+PLAN.md
+TODO.md
+TESTING.md
+CLAUDE.md
+AGENTS.md
+CLAUDE.md
+
+# Config files (not needed for consumers)
+.gitignore
+.mise.toml
+
+# Build artifacts (none for this TS-only package)
+# node_modules is auto-excluded by npm
+
+# Screenshots / images
+*.png
