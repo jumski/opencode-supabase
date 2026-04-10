@@ -4,7 +4,7 @@ Supabase plugin for OpenCode.
 
 ![opencode-supabase screenshot](assets/screenshot.png)
 
-## Install
+## Get started
 
 Requires OpenCode `>= 1.3.4`.
 
@@ -12,28 +12,20 @@ Requires OpenCode `>= 1.3.4`.
 opencode plugin opencode-supabase
 ```
 
-Then:
+Launch `opencode` in your project, then run:
 
-1. launch `opencode` in your project
-2. run `/supabase`
-3. ask your agent what Supabase-related capabilities are available
+```
+/supabase
+```
 
-## What You Can Use
+Connect your account and ask your agent about Supabase capabilities.
 
-- run `/supabase` to connect your Supabase account in the TUI
-- ask your agent to list organizations or projects
-- ask your agent to get project API keys
-- ask your agent to create a new Supabase project
+## Available today
 
-Current tool surface:
-
-- `supabase_list_organizations`
-- `supabase_list_projects`
-- `supabase_get_project_api_keys`
-- `supabase_create_project`
-- `supabase_login`
-
-Under the hood, the plugin handles browser auth, the local callback flow, and token exchange through a broker.
+- **Connect** your Supabase account from OpenCode
+- **List** organizations and projects
+- **Get** project API keys
+- **Create** new Supabase projects
 
 ## Development
 
