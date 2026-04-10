@@ -5,7 +5,12 @@ import {
   exchangeCodeThroughBroker,
   refreshTokenThroughBroker,
 } from "../src/shared/broker.ts";
-import { DEFAULT_SUPABASE_API_BASE_URL, DEFAULT_SUPABASE_OAUTH_AUTHORIZE_URL } from "../src/shared/api.ts";
+import {
+  DEFAULT_SUPABASE_API_BASE_URL,
+  DEFAULT_SUPABASE_OAUTH_AUTHORIZE_URL,
+  DEFAULT_SUPABASE_OAUTH_CLIENT_ID,
+  DEFAULT_SUPABASE_OAUTH_PORT,
+} from "../src/shared/api.ts";
 import { readSupabaseConfig } from "../src/shared/cfg.ts";
 import { buildAuthorizeUrl } from "../src/shared/oauth.ts";
 import type { FetchLike } from "../src/shared/types.ts";
