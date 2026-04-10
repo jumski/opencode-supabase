@@ -1,8 +1,8 @@
 # opencode-supabase
 
-![opencode-supabase screenshot](assets/screenshot.png)
+Supabase plugin for OpenCode.
 
-OpenCode plugin for Supabase workflows, with OAuth wiring through a broker plus separate server and TUI entrypoints.
+![opencode-supabase screenshot](assets/screenshot.png)
 
 ## Install
 
