@@ -1,9 +1,12 @@
 import type { TuiPluginApi } from "@opencode-ai/plugin/tui";
 import { createSignal } from "solid-js";
 
+import type { SupabaseLogger } from "../shared/log.ts";
+
 type SupabaseDialogProps = {
   api: TuiPluginApi;
   onClose: () => void;
+  logger: SupabaseLogger;
 };
 
 type OAuthState =
@@ -28,6 +31,9 @@ export function SupabaseDialog(props: SupabaseDialogProps) {
 
   const startOAuth = async () => {
     try {
+      await props.logger.info("supabase auth started", {
+        phase: "authorize",
+      });
       setState({ type: "authorizing", url: "" });
 
       // Start OAuth authorization
@@ -50,7 +56,14 @@ export function SupabaseDialog(props: SupabaseDialogProps) {
       }
 
       const { url, method } = authData;
+      const safeUrl = new URL(url);
       setState({ type: "authorizing", url });
+
+      await props.logger.debug("supabase auth authorize response received", {
+        method,
+        url_origin: safeUrl.origin,
+        url_path: safeUrl.pathname,
+      });
 
       // Attempt to open browser automatically
       if (method === "auto") {
@@ -58,11 +71,13 @@ export function SupabaseDialog(props: SupabaseDialogProps) {
           const open = await import("open");
           await open.default(url);
         } catch {
+          await props.logger.warn("supabase browser open failed");
           // Browser auto-open failed, user can click the URL manually
         }
       }
 
       setState({ type: "waiting_callback", url });
+      await props.logger.debug("supabase auth waiting for callback");
 
       // Wait for callback
       const callbackResponse = (await props.api.client.provider.oauth.callback({
@@ -79,6 +94,9 @@ export function SupabaseDialog(props: SupabaseDialogProps) {
       const callbackSucceeded = callbackResponse.data === true;
 
       if (callbackSucceeded) {
+        await props.logger.info("supabase auth completed", {
+          status: "success",
+        });
         setState({ type: "success" });
         props.api.ui.toast({
           variant: "success",
@@ -92,6 +110,9 @@ export function SupabaseDialog(props: SupabaseDialogProps) {
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Authorization failed";
+      await props.logger.error("supabase auth failed", {
+        message,
+      });
       setState({ type: "error", message });
       props.api.ui.toast({
         variant: "error",

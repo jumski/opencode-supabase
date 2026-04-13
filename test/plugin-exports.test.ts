@@ -114,6 +114,9 @@ test("supabase dialog treats boolean callback success as connected", async () =>
       },
     },
     client: {
+      app: {
+        log: (_input: unknown) => Promise.resolve(true),
+      },
       provider: {
         oauth: {
           authorize: () => Promise.resolve({ data: { url: "https://example.com/auth", instructions: "Test", method: "manual" } }),
@@ -123,7 +126,14 @@ test("supabase dialog treats boolean callback success as connected", async () =>
     },
   } as any;
 
-  const dialog = SupabaseDialog({ api, onClose: () => api.ui.dialog.clear() }) as {
+  const logger = {
+    debug: () => Promise.resolve(),
+    info: () => Promise.resolve(),
+    warn: () => Promise.resolve(),
+    error: () => Promise.resolve(),
+  };
+
+  const dialog = SupabaseDialog({ api, logger, onClose: () => api.ui.dialog.clear() }) as {
     onConfirm?: () => Promise<void>;
   };
 
@@ -133,5 +143,60 @@ test("supabase dialog treats boolean callback success as connected", async () =>
   expect(toasts[0]).toMatchObject({
     variant: "success",
   });
+  expect(cleared).toBe(1);
+});
+
+test("supabase dialog logs auth milestones without leaking oauth query values", async () => {
+  const appLog = [] as Array<Record<string, unknown>>;
+  let cleared = 0;
+
+  const api = {
+    ui: {
+      DialogAlert: (input: unknown) => input,
+      DialogConfirm: (input: unknown) => input,
+      toast: () => {},
+      dialog: {
+        clear: () => {
+          cleared += 1;
+        },
+      },
+    },
+    client: {
+      app: {
+        log: (input: Record<string, unknown>) => {
+          appLog.push(input);
+          return Promise.resolve(true);
+        },
+      },
+      provider: {
+        oauth: {
+          authorize: () => Promise.resolve({ data: { url: "https://example.com/auth?code=secret", instructions: "Test", method: "auto" } }),
+          callback: () => Promise.resolve({ data: true }),
+        },
+      },
+    },
+  } as any;
+
+  const logger = {
+    debug: (message: string, extra?: Record<string, unknown>) =>
+      api.client.app.log({ service: "opencode-supabase", level: "debug", message, extra }),
+    info: (message: string, extra?: Record<string, unknown>) =>
+      api.client.app.log({ service: "opencode-supabase", level: "info", message, extra }),
+    warn: (message: string, extra?: Record<string, unknown>) =>
+      api.client.app.log({ service: "opencode-supabase", level: "warn", message, extra }),
+    error: (message: string, extra?: Record<string, unknown>) =>
+      api.client.app.log({ service: "opencode-supabase", level: "error", message, extra }),
+  };
+
+  const dialog = SupabaseDialog({ api, logger, onClose: () => api.ui.dialog.clear() }) as {
+    onConfirm?: () => Promise<void>;
+  };
+
+  await dialog.onConfirm?.();
+
+  const serialized = JSON.stringify(appLog);
+  expect(serialized).toContain("supabase auth started");
+  expect(serialized).toContain("supabase auth completed");
+  expect(serialized).not.toContain("code=secret");
   expect(cleared).toBe(1);
 });

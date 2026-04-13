@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 
 import { createSupabaseAuth, stopSupabaseAuthServer } from "../src/server/auth.ts";
 import { readSavedAuth } from "../src/server/store.ts";
+import { createSupabaseLogger } from "../src/shared/log.ts";
 import type { FetchLike } from "../src/shared/types.ts";
 
 const cleanupPaths: string[] = [];
@@ -30,6 +31,151 @@ afterEach(async () => {
 });
 
 describe("server auth hook", () => {
+  test("logs auth authorize and callback completion without secrets", async () => {
+    const input = await createInput();
+    process.env.OPENCODE_SUPABASE_BROKER_URL = "https://example.com/broker";
+    const write = mock(async () => true);
+    const auth = createSupabaseAuth(
+      input as never,
+      {
+        clientId: "plugin-client",
+        oauthPort: 17657,
+      },
+      {
+        fetch: mock(async () =>
+          new Response(
+            JSON.stringify({
+              access_token: "access-123",
+              refresh_token: "refresh-123",
+              expires_in: 1800,
+              token_type: "bearer",
+            }),
+          ),
+        ) as never,
+        logger: createSupabaseLogger({ write }),
+      },
+    );
+
+    const result = await auth.methods[0]!.authorize();
+    const authUrl = new URL(result.url);
+    const redirectUri = new URL(authUrl.searchParams.get("redirect_uri")!);
+    const state = authUrl.searchParams.get("state");
+
+    const pending = result.callback();
+    await fetch(`${redirectUri.toString()}?code=code-123&state=${state}`);
+    await pending;
+
+    const logEntries = write.mock.calls.map((call) => JSON.stringify(((call as unknown) as [unknown])[0]));
+
+    expect(logEntries.some((entry) => entry.includes("supabase auth started"))).toBe(true);
+    expect(logEntries.some((entry) => entry.includes("supabase auth completed"))).toBe(true);
+    expect(logEntries.join(" ")).not.toContain("code-123");
+    expect(logEntries.join(" ")).not.toContain("refresh-123");
+  });
+
+  test("logs broker failures without leaking oauth code", async () => {
+    const input = await createInput();
+    process.env.OPENCODE_SUPABASE_BROKER_URL = "https://example.com/broker";
+    const write = mock(async () => true);
+    const auth = createSupabaseAuth(
+      input as never,
+      {
+        clientId: "plugin-client",
+        oauthPort: 17658,
+      },
+      {
+        fetch: mock(async () =>
+          new Response(
+            JSON.stringify({
+              error: {
+                code: "invalid_request",
+                message: "redirect_uri not allowed",
+              },
+            }),
+            {
+              status: 400,
+              headers: { "Content-Type": "application/json" },
+            },
+          ),
+        ) as never,
+        logger: createSupabaseLogger({ write }),
+      },
+    );
+
+    const result = await auth.methods[0]!.authorize();
+    const authUrl = new URL(result.url);
+    const redirectUri = new URL(authUrl.searchParams.get("redirect_uri")!);
+    const state = authUrl.searchParams.get("state");
+
+    const pending = result.callback();
+    pending.catch(() => undefined);
+    await fetch(`${redirectUri.toString()}?code=code-123&state=${state}`);
+    await expect(pending).rejects.toThrow("redirect_uri not allowed");
+
+    const logEntries = write.mock.calls.map((call) => JSON.stringify(((call as unknown) as [unknown])[0]));
+
+    expect(logEntries.some((entry) => entry.includes("supabase broker exchange failed"))).toBe(true);
+    expect(logEntries.join(" ")).not.toContain("code-123");
+  });
+
+  test("logs oauth provider denial without leaking callback values", async () => {
+    const input = await createInput();
+    process.env.OPENCODE_SUPABASE_BROKER_URL = "https://example.com/broker";
+    const write = mock(async () => true);
+    const auth = createSupabaseAuth(
+      input as never,
+      {
+        clientId: "plugin-client",
+        oauthPort: 17659,
+      },
+      {
+        logger: createSupabaseLogger({ write }),
+      },
+    );
+
+    const result = await auth.methods[0]!.authorize();
+    const authUrl = new URL(result.url);
+    const redirectUri = new URL(authUrl.searchParams.get("redirect_uri")!);
+    const state = authUrl.searchParams.get("state");
+
+    const pending = result.callback();
+    pending.catch(() => undefined);
+    await fetch(`${redirectUri.toString()}?error=access_denied&error_description=User%20denied&state=${state}`);
+    await expect(pending).rejects.toThrow("User denied");
+
+    const logEntries = write.mock.calls.map((call) => JSON.stringify(((call as unknown) as [unknown])[0]));
+    expect(logEntries.some((entry) => entry.includes("supabase auth failed"))).toBe(true);
+    expect(logEntries.join(" ")).not.toContain("access_denied");
+  });
+
+  test("logs callback timeout failures", async () => {
+    const input = await createInput();
+    process.env.OPENCODE_SUPABASE_BROKER_URL = "https://example.com/broker";
+    const write = mock(async () => true);
+    const timer = { ref() { return timer; }, unref() { return timer; } } as unknown as ReturnType<typeof setTimeout>;
+
+    const auth = createSupabaseAuth(
+      input as never,
+      {
+        clientId: "plugin-client",
+        oauthPort: 17660,
+      },
+      {
+        logger: createSupabaseLogger({ write }),
+        setCallbackTimeout: ((callback: (...args: Array<unknown>) => void) => {
+          queueMicrotask(() => callback());
+          return timer;
+        }) as typeof setTimeout,
+      },
+    );
+
+    const result = await auth.methods[0]!.authorize();
+    await expect(result.callback()).rejects.toThrow("OAuth callback timeout - authorization took too long");
+
+    const logEntries = write.mock.calls.map((call) => JSON.stringify(((call as unknown) as [unknown])[0]));
+    expect(logEntries.some((entry) => entry.includes("supabase auth callback timed out"))).toBe(true);
+  });
+
   test("builds an auto oauth authorize result using the plugin callback server", async () => {
     const input = await createInput();
     process.env.OPENCODE_SUPABASE_BROKER_URL = "https://example.com/broker";

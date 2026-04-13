@@ -7,6 +7,7 @@ import {
   type BrokerConfig,
 } from "../shared/broker.ts";
 import { readSupabaseConfig } from "../shared/cfg.ts";
+import type { SupabaseLogger } from "../shared/log.ts";
 import { buildAuthorizeUrl, generatePKCE, generateState } from "../shared/oauth.ts";
 import type { FetchLike, SupabaseTokenResponse } from "../shared/types.ts";
 import { HTML_SUCCESS, htmlError } from "./auth-html.ts";
@@ -25,6 +26,8 @@ type PendingAuth = {
 
 type AuthDeps = {
   fetch?: FetchLike;
+  logger?: SupabaseLogger;
+  setCallbackTimeout?: typeof setTimeout;
 };
 
 let server: ReturnType<typeof Bun.serve> | undefined;
@@ -69,6 +72,10 @@ async function ensureServer(
     baseUrl: config.brokerBaseUrl,
   };
 
+  await deps.logger?.info("supabase callback server started", {
+    port,
+  });
+
   server = Bun.serve({
     port,
     async fetch(req) {
@@ -78,6 +85,11 @@ async function ensureServer(
       }
 
       const state = url.searchParams.get("state");
+      await deps.logger?.debug("supabase auth callback received", {
+        has_state: Boolean(state),
+        has_code: Boolean(url.searchParams.get("code")),
+        has_error: Boolean(url.searchParams.get("error")),
+      });
       if (!state) {
         return new Response(htmlError("Missing required state parameter - potential CSRF attack"), {
           status: 400,
@@ -98,6 +110,9 @@ async function ensureServer(
       if (error) {
         clearTimeout(pending.timeout);
         pendingAuths.delete(state);
+        await deps.logger?.error("supabase auth failed", {
+          reason: "provider_denied",
+        });
         pending.reject(new Error(errorDescription || error));
         return new Response(htmlError(errorDescription || error), {
           headers: { "Content-Type": "text/html" },
@@ -108,6 +123,9 @@ async function ensureServer(
       if (!code) {
         clearTimeout(pending.timeout);
         pendingAuths.delete(state);
+        await deps.logger?.error("supabase auth failed", {
+          reason: "missing_code",
+        });
         pending.reject(new Error("Missing authorization code"));
         return new Response(htmlError("Missing authorization code"), {
           status: 400,
@@ -127,6 +145,7 @@ async function ensureServer(
             code_verifier: pending.codeVerifier,
           },
           deps.fetch,
+          deps.logger,
         );
 
         const expires = Date.now() + (tokens.expires_in || 3600) * 1000;
@@ -138,6 +157,10 @@ async function ensureServer(
 
         pending.resolve({ tokens, expires });
 
+        await deps.logger?.info("supabase auth completed", {
+          status: "success",
+        });
+
         return new Response(HTML_SUCCESS, {
           headers: { "Content-Type": "text/html" },
         });
@@ -145,6 +168,11 @@ async function ensureServer(
         const errorMessage = cause instanceof BrokerClientError
           ? `Authorization failed: ${cause.message}`
           : "Authorization failed";
+
+        await deps.logger?.error("supabase auth failed", {
+          status: cause instanceof BrokerClientError ? cause.status : 400,
+          broker_error: cause instanceof BrokerClientError,
+        });
 
         pending.reject(cause instanceof Error ? cause : new Error(String(cause)));
 
@@ -159,11 +187,20 @@ async function ensureServer(
   serverPort = port;
 }
 
-function waitForCallback(state: string, codeVerifier: string, redirectUri: string) {
+function waitForCallback(
+  state: string,
+  codeVerifier: string,
+  redirectUri: string,
+  deps: AuthDeps,
+) {
   return new Promise<{ tokens: SupabaseTokenResponse; expires: number }>((resolve, reject) => {
-    const timeout = setTimeout(() => {
+    const scheduleTimeout = deps.setCallbackTimeout ?? setTimeout;
+    const timeout = scheduleTimeout(() => {
       if (!pendingAuths.has(state)) return;
       pendingAuths.delete(state);
+      void deps.logger?.error("supabase auth callback timed out", {
+        reason: "timeout",
+      });
       reject(new Error("OAuth callback timeout - authorization took too long"));
     }, CALLBACK_TIMEOUT_MS);
 
@@ -192,10 +229,13 @@ export function createSupabaseAuth(
         label: "Supabase",
         async authorize() {
           await ensureServer(config.oauthPort, config, input, deps);
+          await deps.logger?.info("supabase auth started", {
+            port: config.oauthPort,
+          });
           const pkce = await generatePKCE();
           const state = generateState();
           const redirectUri = callbackUrl(config.oauthPort);
-          const callbackPromise = waitForCallback(state, pkce.verifier, redirectUri);
+          const callbackPromise = waitForCallback(state, pkce.verifier, redirectUri, deps);
 
           return {
             url: buildAuthorizeUrl(config, redirectUri, pkce, state),

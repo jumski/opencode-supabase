@@ -12,6 +12,12 @@ import {
   DEFAULT_SUPABASE_OAUTH_PORT,
 } from "../src/shared/api.ts";
 import { readSupabaseConfig } from "../src/shared/cfg.ts";
+import {
+  createSupabaseLogger,
+  createServerLogWriter,
+  createTuiLogWriter,
+  type LogEntry,
+} from "../src/shared/log.ts";
 import { buildAuthorizeUrl } from "../src/shared/oauth.ts";
 import type { FetchLike } from "../src/shared/types.ts";
 
@@ -69,15 +75,15 @@ describe("shared config", () => {
     });
   });
 
-  test("fails fast when client id is missing", () => {
-    expect(() =>
-      readSupabaseConfig(
-        {
-          oauthPort: 1456,
-        },
-        {},
-      ),
-    ).toThrow("Missing required Supabase config: clientId");
+  test("uses the default client id when not provided", () => {
+    const config = readSupabaseConfig(
+      {
+        oauthPort: 1456,
+      },
+      {},
+    );
+
+    expect(config.clientId).toBe(DEFAULT_SUPABASE_OAUTH_CLIENT_ID);
   });
 
   test("uses default broker base url when not provided", () => {
@@ -92,15 +98,15 @@ describe("shared config", () => {
     expect(config.brokerBaseUrl).toBe("https://iaoxncwzemnfxcdwakzb.supabase.co/functions/v1/opencode-supabase-broker");
   });
 
-  test("fails fast when oauth port is missing or invalid", () => {
-    expect(() =>
+  test("uses the default oauth port and rejects invalid env ports", () => {
+    expect(
       readSupabaseConfig(
         {
           clientId: "plugin-client",
         },
         {},
-      ),
-    ).toThrow("Missing required Supabase config: oauthPort");
+      ).oauthPort,
+    ).toBe(DEFAULT_SUPABASE_OAUTH_PORT);
 
     expect(() =>
       readSupabaseConfig(undefined, {
@@ -126,6 +132,98 @@ describe("shared oauth", () => {
     expect(url).toBe(
       "https://example.com/oauth/authorize?response_type=code&client_id=plugin-client&redirect_uri=http%3A%2F%2Flocalhost%3A1456%2Fcallback&code_challenge=challenge&code_challenge_method=S256&state=state-123",
     );
+  });
+});
+
+describe("shared log", () => {
+  test("writes structured entries with the supabase service name", async () => {
+    const write = mock(async () => true);
+    const logger = createSupabaseLogger({ write });
+
+    await logger.info("supabase auth started", { phase: "authorize" });
+
+    expect(write).toHaveBeenCalledTimes(1);
+    expect(write).toHaveBeenCalledWith({
+      service: "opencode-supabase",
+      level: "info",
+      message: "supabase auth started",
+      extra: { phase: "authorize" },
+    });
+  });
+
+  test("swallows host logger failures and prints to console.error", async () => {
+    const write = mock(async () => {
+      throw new Error("host logger offline");
+    });
+    const logger = createSupabaseLogger({ write });
+    const originalError = console.error;
+    const errors: unknown[] = [];
+    console.error = (...args: unknown[]) => errors.push(...args);
+
+    try {
+      await logger.error("supabase auth failed");
+      expect(errors.some((e) => String(e).includes("host logger offline"))).toBe(true);
+    } finally {
+      console.error = originalError;
+    }
+  });
+
+  test("detects v2 SDK error responses that do not throw", async () => {
+    const write = mock(async () => ({ error: "bad request" }));
+    const logger = createSupabaseLogger({ write });
+    const originalError = console.error;
+    const errors: unknown[] = [];
+    console.error = (...args: unknown[]) => errors.push(...args);
+
+    try {
+      await logger.info("test message");
+      expect(errors.some((e) => String(e).includes("host log rejected"))).toBe(true);
+    } finally {
+      console.error = originalError;
+    }
+  });
+});
+
+describe("server log writer", () => {
+  test("wraps log entry in body for v1 SDK", async () => {
+    const logCalls: Array<{ body: LogEntry }> = [];
+    const client = {
+      app: {
+        log: (input: { body: LogEntry }) => {
+          logCalls.push(input);
+          return Promise.resolve(true);
+        },
+      },
+    };
+
+    const write = createServerLogWriter(client);
+    const entry: LogEntry = { service: "opencode-supabase", level: "info", message: "test" };
+    await write(entry);
+
+    expect(logCalls).toHaveLength(1);
+    expect(logCalls[0]!.body).toEqual(entry);
+  });
+});
+
+describe("tui log writer", () => {
+  test("passes flat entry with throwOnError for v2 SDK", async () => {
+    const logCalls: Array<{ params: LogEntry; options: { throwOnError?: boolean } }> = [];
+    const client = {
+      app: {
+        log: (input: LogEntry, options?: { throwOnError?: boolean }) => {
+          logCalls.push({ params: input, options: options ?? { throwOnError: false } });
+          return Promise.resolve(true);
+        },
+      },
+    };
+
+    const write = createTuiLogWriter(client);
+    const entry: LogEntry = { service: "opencode-supabase", level: "info", message: "test" };
+    await write(entry);
+
+    expect(logCalls).toHaveLength(1);
+    expect(logCalls[0]!.params).toEqual(entry);
+    expect(logCalls[0]!.options.throwOnError).toBe(true);
   });
 });
 
