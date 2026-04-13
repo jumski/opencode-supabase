@@ -1,12 +1,12 @@
 import type { Plugin } from "@opencode-ai/plugin";
 
-import { createSupabaseLogger } from "../shared/log.ts";
+import { createServerLogWriter, createSupabaseLogger } from "../shared/log.ts";
 import { createSupabaseAuth } from "./auth.ts";
 import { createSupabaseTools } from "./tools.ts";
 
 const server: Plugin = async (input, options) => {
   const logger = createSupabaseLogger({
-    write: (entry) => input.client.app.log(entry as any),
+    write: createServerLogWriter(input.client),
   });
 
   return {

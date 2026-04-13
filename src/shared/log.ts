@@ -2,7 +2,7 @@ export type SupabaseLogLevel = "debug" | "info" | "warn" | "error";
 
 export type SupabaseLogger = ReturnType<typeof createSupabaseLogger>;
 
-type LogEntry = {
+export type LogEntry = {
   service: string;
   level: SupabaseLogLevel;
   message: string;
@@ -18,13 +18,18 @@ export function createSupabaseLogger(input: { write: LogWriter }) {
     extra?: Record<string, unknown>,
   ) {
     try {
-      await input.write({
+      const result = await input.write({
         service: "opencode-supabase",
         level,
         message,
         extra,
       });
-    } catch {}
+      if (result && typeof result === "object" && "error" in result) {
+        console.error("[opencode-supabase] host log rejected:", (result as { error: unknown }).error);
+      }
+    } catch (error) {
+      console.error("[opencode-supabase] host log failed:", error instanceof Error ? error.message : error);
+    }
   }
 
   return {
@@ -41,4 +46,12 @@ export function createSupabaseLogger(input: { write: LogWriter }) {
       return emit("error", message, extra);
     },
   };
+}
+
+export function createServerLogWriter(client: { app: { log: (input: { body: LogEntry }) => Promise<unknown> } }) {
+  return (entry: LogEntry) => client.app.log({ body: entry });
+}
+
+export function createTuiLogWriter(client: { app: { log: (input: LogEntry, options?: { throwOnError?: boolean }) => Promise<unknown> } }) {
+  return (entry: LogEntry) => client.app.log(entry, { throwOnError: true });
 }
