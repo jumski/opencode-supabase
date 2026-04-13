@@ -22,13 +22,18 @@ Connect your account and ask your agent about Supabase capabilities.
 
 ## Debug Logging
 
-If you hit auth or tool errors and need logs for an issue, run OpenCode like this and share `opencode-supabase-debug.log`:
+If you hit auth or tool errors and need logs for an issue, collect the newest OpenCode session log from its default log directory:
+
+- macOS/Linux: `~/.local/share/opencode/log/`
+- Windows: `%USERPROFILE%\.local\share\opencode\log`
+
+Run OpenCode with debug logging enabled while reproducing the problem:
 
 ```bash
-opencode --log-level DEBUG --print-logs 2>opencode-supabase-debug.log
+opencode --log-level DEBUG --print-logs
 ```
 
-Without `--print-logs`, OpenCode writes logs to its default log directory, documented as `~/.local/share/opencode/log/` on macOS/Linux and `%USERPROFILE%\.local\share\opencode\log` on Windows.
+Then share that newest session log file in the issue. In our testing, the session log file is more reliable than redirecting `stderr` with `2>` for capturing plugin activity.
 
 ## Available today
 

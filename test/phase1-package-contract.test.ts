@@ -17,8 +17,10 @@ describe("phase 1 package contract", () => {
 
   test("documents plugin install and debug log capture guidance", () => {
     expect(readme).toContain("opencode plugin opencode-supabase");
-    expect(readme).toContain("opencode --log-level DEBUG --print-logs 2>opencode-supabase-debug.log");
+    expect(readme).toContain("collect the newest OpenCode session log");
+    expect(readme).toContain("opencode --log-level DEBUG --print-logs");
     expect(readme).toContain("~/.local/share/opencode/log/");
     expect(readme).toContain("%USERPROFILE%\\.local\\share\\opencode\\log");
+    expect(readme).toContain("more reliable than redirecting `stderr` with `2>`");
   });
 });
