@@ -27,6 +27,7 @@ type PendingAuth = {
 type AuthDeps = {
   fetch?: FetchLike;
   logger?: SupabaseLogger;
+  setCallbackTimeout?: typeof setTimeout;
 };
 
 let server: ReturnType<typeof Bun.serve> | undefined;
@@ -109,6 +110,9 @@ async function ensureServer(
       if (error) {
         clearTimeout(pending.timeout);
         pendingAuths.delete(state);
+        await deps.logger?.error("supabase auth failed", {
+          reason: "provider_denied",
+        });
         pending.reject(new Error(errorDescription || error));
         return new Response(htmlError(errorDescription || error), {
           headers: { "Content-Type": "text/html" },
@@ -119,6 +123,9 @@ async function ensureServer(
       if (!code) {
         clearTimeout(pending.timeout);
         pendingAuths.delete(state);
+        await deps.logger?.error("supabase auth failed", {
+          reason: "missing_code",
+        });
         pending.reject(new Error("Missing authorization code"));
         return new Response(htmlError("Missing authorization code"), {
           status: 400,
@@ -180,11 +187,20 @@ async function ensureServer(
   serverPort = port;
 }
 
-function waitForCallback(state: string, codeVerifier: string, redirectUri: string) {
+function waitForCallback(
+  state: string,
+  codeVerifier: string,
+  redirectUri: string,
+  deps: AuthDeps,
+) {
   return new Promise<{ tokens: SupabaseTokenResponse; expires: number }>((resolve, reject) => {
-    const timeout = setTimeout(() => {
+    const scheduleTimeout = deps.setCallbackTimeout ?? setTimeout;
+    const timeout = scheduleTimeout(() => {
       if (!pendingAuths.has(state)) return;
       pendingAuths.delete(state);
+      void deps.logger?.error("supabase auth callback timed out", {
+        reason: "timeout",
+      });
       reject(new Error("OAuth callback timeout - authorization took too long"));
     }, CALLBACK_TIMEOUT_MS);
 
@@ -219,7 +235,7 @@ export function createSupabaseAuth(
           const pkce = await generatePKCE();
           const state = generateState();
           const redirectUri = callbackUrl(config.oauthPort);
-          const callbackPromise = waitForCallback(state, pkce.verifier, redirectUri);
+          const callbackPromise = waitForCallback(state, pkce.verifier, redirectUri, deps);
 
           return {
             url: buildAuthorizeUrl(config, redirectUri, pkce, state),

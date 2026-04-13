@@ -118,6 +118,64 @@ describe("server auth hook", () => {
     expect(logEntries.join(" ")).not.toContain("code-123");
   });
 
+  test("logs oauth provider denial without leaking callback values", async () => {
+    const input = await createInput();
+    process.env.OPENCODE_SUPABASE_BROKER_URL = "https://example.com/broker";
+    const write = mock(async () => true);
+    const auth = createSupabaseAuth(
+      input as never,
+      {
+        clientId: "plugin-client",
+        oauthPort: 17659,
+      },
+      {
+        logger: createSupabaseLogger({ write }),
+      },
+    );
+
+    const result = await auth.methods[0]!.authorize();
+    const authUrl = new URL(result.url);
+    const redirectUri = new URL(authUrl.searchParams.get("redirect_uri")!);
+    const state = authUrl.searchParams.get("state");
+
+    const pending = result.callback();
+    pending.catch(() => undefined);
+    await fetch(`${redirectUri.toString()}?error=access_denied&error_description=User%20denied&state=${state}`);
+    await expect(pending).rejects.toThrow("User denied");
+
+    const logEntries = write.mock.calls.map((call) => JSON.stringify(((call as unknown) as [unknown])[0]));
+    expect(logEntries.some((entry) => entry.includes("supabase auth failed"))).toBe(true);
+    expect(logEntries.join(" ")).not.toContain("access_denied");
+  });
+
+  test("logs callback timeout failures", async () => {
+    const input = await createInput();
+    process.env.OPENCODE_SUPABASE_BROKER_URL = "https://example.com/broker";
+    const write = mock(async () => true);
+    const timer = { ref() { return timer; }, unref() { return timer; } } as unknown as ReturnType<typeof setTimeout>;
+
+    const auth = createSupabaseAuth(
+      input as never,
+      {
+        clientId: "plugin-client",
+        oauthPort: 17660,
+      },
+      {
+        logger: createSupabaseLogger({ write }),
+        setCallbackTimeout: ((callback: (...args: Array<unknown>) => void) => {
+          queueMicrotask(() => callback());
+          return timer;
+        }) as typeof setTimeout,
+      },
+    );
+
+    const result = await auth.methods[0]!.authorize();
+    await expect(result.callback()).rejects.toThrow("OAuth callback timeout - authorization took too long");
+
+    const logEntries = write.mock.calls.map((call) => JSON.stringify(((call as unknown) as [unknown])[0]));
+    expect(logEntries.some((entry) => entry.includes("supabase auth callback timed out"))).toBe(true);
+  });
+
   test("builds an auto oauth authorize result using the plugin callback server", async () => {
     const input = await createInput();
     process.env.OPENCODE_SUPABASE_BROKER_URL = "https://example.com/broker";

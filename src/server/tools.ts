@@ -85,38 +85,49 @@ async function executeSupabaseRequest(
     messageID: context.messageID,
     agent: context.agent,
   });
-  const config = readSupabaseConfig(options);
-  const auth = await ensureSupabaseToolAuth(input, options, deps);
-  const response = await supabaseManagementApiFetch(
-    config,
-    auth.access,
-    path,
-    init,
-    deps.fetch,
-  );
+  try {
+    const config = readSupabaseConfig(options);
+    const auth = await ensureSupabaseToolAuth(input, options, deps);
+    const response = await supabaseManagementApiFetch(
+      config,
+      auth.access,
+      path,
+      init,
+      deps.fetch,
+    );
 
-  await deps.logger?.debug("supabase api response received", {
-    tool: toolName,
-    path,
-    status: response.status,
-  });
-
-  if (!response.ok) {
-    const body = await response.text().catch(() => "");
-    await deps.logger?.error("supabase tool failed", {
+    await deps.logger?.debug("supabase api response received", {
       tool: toolName,
       path,
       status: response.status,
     });
-    throw new Error(`Failed to ${errorLabel}: ${response.status} ${body}`.trim());
+
+    if (!response.ok) {
+      const body = await response.text().catch(() => "");
+      await deps.logger?.error("supabase tool failed", {
+        tool: toolName,
+        path,
+        status: response.status,
+      });
+      throw new Error(`Failed to ${errorLabel}: ${response.status} ${body}`.trim());
+    }
+
+    const payload = await response.json();
+
+    await deps.logger?.info("supabase tool completed", {
+      tool: toolName,
+      duration_ms: Date.now() - startedAt,
+    });
+
+    return JSON.stringify(payload, null, 2);
+  } catch (error) {
+    await deps.logger?.error("supabase tool failed", {
+      tool: toolName,
+      path,
+      reason: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
   }
-
-  await deps.logger?.info("supabase tool completed", {
-    tool: toolName,
-    duration_ms: Date.now() - startedAt,
-  });
-
-  return JSON.stringify(await response.json(), null, 2);
 }
 
 async function executeSupabaseGet(
