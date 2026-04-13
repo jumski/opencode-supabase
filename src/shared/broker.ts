@@ -1,4 +1,5 @@
 import type { FetchLike, SupabaseTokenResponse } from "./types.ts";
+import type { SupabaseLogger } from "./log.ts";
 
 export type BrokerConfig = {
   baseUrl: string;
@@ -95,8 +96,13 @@ async function makeBrokerRequest(
   endpoint: string,
   body: unknown,
   fetchImpl: FetchLike,
+  logger?: SupabaseLogger,
 ): Promise<SupabaseTokenResponse> {
   const url = `${config.baseUrl.replace(/\/$/, "")}${endpoint}`;
+
+  await logger?.debug("supabase broker request started", {
+    endpoint,
+  });
 
   let response: Response;
 
@@ -110,6 +116,10 @@ async function makeBrokerRequest(
       body: JSON.stringify(body),
     });
   } catch (cause) {
+    await logger?.error("supabase broker request failed", {
+      endpoint,
+      status: 502,
+    });
     throw new BrokerClientError({
       code: "upstream_error",
       message: "broker request failed",
@@ -122,6 +132,10 @@ async function makeBrokerRequest(
   try {
     payload = await response.json();
   } catch {
+    await logger?.error("supabase broker response invalid", {
+      endpoint,
+      status: response.status,
+    });
     throw new BrokerClientError({
       code: "upstream_error",
       message: "broker returned an invalid response",
@@ -129,12 +143,26 @@ async function makeBrokerRequest(
     });
   }
 
+  await logger?.debug("supabase broker response received", {
+    endpoint,
+    status: response.status,
+  });
+
   if (!response.ok) {
     const errorBody = payload as Record<string, unknown> | undefined;
     const error = errorBody?.error as Record<string, unknown> | undefined;
 
     const code = (error?.code as BrokerErrorCode) || "upstream_error";
     const message = (error?.message as string) || "broker request failed";
+
+    await logger?.error(
+      endpoint === "/exchange" ? "supabase broker exchange failed" : "supabase broker refresh failed",
+      {
+        endpoint,
+        status: response.status,
+        code,
+      },
+    );
 
     throw new BrokerClientError({
       code,
@@ -150,6 +178,7 @@ export async function exchangeCodeThroughBroker(
   config: BrokerConfig,
   input: ExchangeRequest,
   fetchImpl: FetchLike = fetch,
+  logger?: SupabaseLogger,
 ): Promise<SupabaseTokenResponse> {
   return makeBrokerRequest(
     config,
@@ -160,6 +189,7 @@ export async function exchangeCodeThroughBroker(
       redirect_uri: input.redirect_uri,
     },
     fetchImpl,
+    logger,
   );
 }
 
@@ -167,6 +197,7 @@ export async function refreshTokenThroughBroker(
   config: BrokerConfig,
   input: RefreshRequest,
   fetchImpl: FetchLike = fetch,
+  logger?: SupabaseLogger,
 ): Promise<SupabaseTokenResponse> {
   return makeBrokerRequest(
     config,
@@ -175,5 +206,6 @@ export async function refreshTokenThroughBroker(
       refresh_token: input.refresh_token,
     },
     fetchImpl,
+    logger,
   );
 }

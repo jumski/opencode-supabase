@@ -10,6 +10,7 @@ import {
   type SupabaseToolInput,
 } from "../src/server/tools.ts";
 import { readSavedAuth, writeSavedAuth } from "../src/server/store.ts";
+import { createSupabaseLogger } from "../src/shared/log.ts";
 import type { FetchLike } from "../src/shared/types.ts";
 
 type TestPluginInput = SupabaseToolInput;
@@ -70,6 +71,50 @@ afterEach(async () => {
 });
 
 describe("server tools auth helper", () => {
+  test("logs tool execution boundaries and redacts sensitive args", async () => {
+    const { input } = await createInput();
+    process.env.OPENCODE_SUPABASE_BROKER_URL = "https://example.com/broker";
+    await writeSavedAuth(input, {
+      access: `access-${Date.now()}`,
+      refresh: `refresh-${Date.now()}`,
+      expires: Date.now() + 60_000,
+    });
+
+    const fetchMock = mock(async () =>
+      new Response(JSON.stringify({ id: "project-1" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }));
+    const write = mock(async () => true);
+    const tools = createSupabaseTools(
+      input,
+      {
+        clientId: "plugin-client",
+        oauthPort: 17671,
+      },
+      {
+        fetch: fetchMock as unknown as FetchLike,
+        logger: createSupabaseLogger({ write }),
+      },
+    );
+
+    await tools.supabase_create_project.execute(
+      {
+        organization_id: "org-1",
+        name: "My Project",
+        region: "us-east-1",
+        db_pass: "super-secret-db-pass",
+      },
+      createContext(input),
+    );
+
+    const entries = write.mock.calls.map((call) => JSON.stringify(((call as unknown) as [unknown])[0]));
+    expect(entries.some((entry) => entry.includes("supabase tool started"))).toBe(true);
+    expect(entries.some((entry) => entry.includes("supabase tool completed"))).toBe(true);
+    expect(entries.join(" ")).toContain("supabase_create_project");
+    expect(entries.join(" ")).not.toContain("super-secret-db-pass");
+  });
+
   test("fails clearly when no persisted Supabase auth exists", async () => {
     const { input } = await createInput();
     process.env.OPENCODE_SUPABASE_BROKER_URL = "https://example.com/broker";

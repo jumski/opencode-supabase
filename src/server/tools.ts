@@ -8,11 +8,13 @@ import {
 } from "../shared/broker.ts";
 import { supabaseManagementApiFetch } from "../shared/api.ts";
 import { readSupabaseConfig } from "../shared/cfg.ts";
+import type { SupabaseLogger } from "../shared/log.ts";
 import type { FetchLike } from "../shared/types.ts";
 import { clearSavedAuth, readSavedAuth, writeSavedAuth, type SavedAuth } from "./store.ts";
 
 type ToolDeps = {
   fetch?: FetchLike;
+  logger?: SupabaseLogger;
 };
 
 type HostAuthWriter = {
@@ -58,14 +60,31 @@ function generateRandomString(length: number) {
     .slice(0, length);
 }
 
+function sanitizeToolArgs(name: string, args: Record<string, unknown>) {
+  const next = { ...args };
+  if (name === "supabase_create_project" && typeof next.db_pass === "string") {
+    next.db_pass = "[redacted]";
+  }
+  return next;
+}
+
 async function executeSupabaseRequest(
   input: SupabaseToolInput,
   options: PluginOptions | undefined,
   deps: ToolDeps,
+  toolName: string,
+  context: SupabaseToolContext,
   path: string,
   errorLabel: string,
   init?: RequestInit,
 ) {
+  const startedAt = Date.now();
+  await deps.logger?.info("supabase tool started", {
+    tool: toolName,
+    sessionID: context.sessionID,
+    messageID: context.messageID,
+    agent: context.agent,
+  });
   const config = readSupabaseConfig(options);
   const auth = await ensureSupabaseToolAuth(input, options, deps);
   const response = await supabaseManagementApiFetch(
@@ -76,10 +95,26 @@ async function executeSupabaseRequest(
     deps.fetch,
   );
 
+  await deps.logger?.debug("supabase api response received", {
+    tool: toolName,
+    path,
+    status: response.status,
+  });
+
   if (!response.ok) {
     const body = await response.text().catch(() => "");
+    await deps.logger?.error("supabase tool failed", {
+      tool: toolName,
+      path,
+      status: response.status,
+    });
     throw new Error(`Failed to ${errorLabel}: ${response.status} ${body}`.trim());
   }
+
+  await deps.logger?.info("supabase tool completed", {
+    tool: toolName,
+    duration_ms: Date.now() - startedAt,
+  });
 
   return JSON.stringify(await response.json(), null, 2);
 }
@@ -88,10 +123,12 @@ async function executeSupabaseGet(
   input: SupabaseToolInput,
   options: PluginOptions | undefined,
   deps: ToolDeps,
+  toolName: string,
+  context: SupabaseToolContext,
   path: string,
   errorLabel: string,
 ) {
-  return executeSupabaseRequest(input, options, deps, path, errorLabel);
+  return executeSupabaseRequest(input, options, deps, toolName, context, path, errorLabel);
 }
 
 async function setHostAuth(
@@ -143,6 +180,7 @@ export async function ensureSupabaseToolAuth(
       { baseUrl: config.brokerBaseUrl },
       { refresh_token: saved.auth.refresh },
       deps.fetch,
+      deps.logger,
     );
 
     const nextAuth: SavedAuth = {
@@ -181,14 +219,30 @@ export function createSupabaseTools(
       description: "List all Supabase organizations for the authenticated user.",
       args: {},
       async execute(_args, _context: SupabaseToolContext) {
-        return executeSupabaseGet(input, options, deps, "/organizations", "list organizations");
+        return executeSupabaseGet(
+          input,
+          options,
+          deps,
+          "supabase_list_organizations",
+          _context,
+          "/organizations",
+          "list organizations",
+        );
       },
     }),
     supabase_list_projects: tool({
       description: "List all Supabase projects for the authenticated user.",
       args: {},
       async execute(_args, _context: SupabaseToolContext) {
-        return executeSupabaseGet(input, options, deps, "/projects", "list projects");
+        return executeSupabaseGet(
+          input,
+          options,
+          deps,
+          "supabase_list_projects",
+          _context,
+          "/projects",
+          "list projects",
+        );
       },
     }),
     supabase_get_project_api_keys: tool({
@@ -201,6 +255,8 @@ export function createSupabaseTools(
           input,
           options,
           deps,
+          "supabase_get_project_api_keys",
+          _context,
           `/projects/${args.project_ref}/api-keys`,
           "get API keys",
         );
@@ -215,10 +271,16 @@ export function createSupabaseTools(
         db_pass: tool.schema.string().describe("Database password").optional(),
       },
       async execute(args, _context: SupabaseToolContext) {
+        await deps.logger?.debug("supabase tool args prepared", {
+          tool: "supabase_create_project",
+          args: sanitizeToolArgs("supabase_create_project", args),
+        });
         return executeSupabaseRequest(
           input,
           options,
           deps,
+          "supabase_create_project",
+          _context,
           "/projects",
           "create project",
           {
