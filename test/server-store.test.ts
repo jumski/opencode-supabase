@@ -77,4 +77,12 @@ describe("server auth store", () => {
       join(input.directory, ".opencode", "supabase-auth.json"),
     );
   });
+
+  test("falls back to the session directory when worktree resolves to root", async () => {
+    const input = await createInput();
+
+    expect(getStoreFile({ ...input, worktree: "/" })).toBe(
+      join(input.directory, ".opencode", "supabase-auth.json"),
+    );
+  });
 });

@@ -18,7 +18,7 @@ export type SavedState = {
 const STORE_FILE = "supabase-auth.json";
 
 export function file(input: StoreInput): string {
-  const root = input.worktree || input.directory;
+  const root = input.worktree && input.worktree !== "/" ? input.worktree : input.directory;
   return join(root, ".opencode", STORE_FILE);
 }
 
