@@ -347,6 +347,36 @@ describe("server tools auth helper", () => {
     });
   });
 
+  test("uses session-scoped auth when worktree resolves to root", async () => {
+    const { input } = await createInput();
+    process.env.OPENCODE_SUPABASE_BROKER_URL = "https://example.com/broker";
+    await writeSavedAuth({ ...input, worktree: "/" }, {
+      access: "saved-access",
+      refresh: "saved-refresh",
+      expires: Date.now() + 60_000,
+    });
+
+    const rootInput = {
+      ...input,
+      worktree: "/",
+    } satisfies TestPluginInput;
+
+    await expect(
+      ensureSupabaseToolAuth(
+        rootInput,
+        {
+          clientId: "plugin-client",
+          oauthPort: 17684,
+        },
+        { fetch: mock(async () => new Response("unexpected")) },
+      ),
+    ).resolves.toEqual({
+      access: "saved-access",
+      refresh: "saved-refresh",
+      expires: expect.any(Number),
+    });
+  });
+
   test("refreshes expired persisted auth through the broker before calling the management API", async () => {
     const { hostAuthSet, input } = await createInput();
     process.env.OPENCODE_SUPABASE_BROKER_URL = "https://example.com/broker";

@@ -31,7 +31,6 @@ function resolveStoreRoot(input: StoreInput): string {
   const pathFromWorktree = relative(worktree, directory);
   if (
     pathFromWorktree === "" ||
-    pathFromWorktree === "." ||
     (!pathFromWorktree.startsWith("..") && !pathFromWorktree.startsWith(`..${sep}`))
   ) {
     return worktree;
