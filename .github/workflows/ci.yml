@@ -57,7 +57,7 @@ jobs:
           export XDG_DATA_HOME="$HOME/.local/share"
           export XDG_CACHE_HOME="$HOME/.cache"
 
-          TARBALL="$(npm pack | tail -n 1)"
+          TARBALL="$(npm pack --json | jq -r '.[0].filename')"
           SPEC="opencode-supabase@file:$(pwd)/$TARBALL"
 
           WORKDIR="$(mktemp -d)"
@@ -65,4 +65,7 @@ jobs:
           git init -q
 
           opencode plugin "$SPEC"
-          opencode debug config | jq -e --arg spec "$SPEC" '.plugin_origins | any(.spec == $spec and .scope == "local")'
+          CONFIG_JSON="$(opencode debug config)"
+          printf 'Smoke spec: %s\n' "$SPEC"
+          printf '%s\n' "$CONFIG_JSON" | jq '{plugin, plugin_origins}'
+          printf '%s\n' "$CONFIG_JSON" | jq -e --arg spec "$SPEC" '.plugin_origins | any(.spec == $spec and .scope == "local")'
