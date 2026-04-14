@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 import { createSupabaseAuth, stopSupabaseAuthServer } from "../src/server/auth.ts";
 import { readSavedAuth } from "../src/server/store.ts";
@@ -319,6 +319,107 @@ describe("server auth hook", () => {
     expect(callbackResult.expires).toBeGreaterThan(Date.now());
     expect(fetchMock).toHaveBeenCalledTimes(1);
     await expect(readSavedAuth(input as never)).resolves.toEqual({
+      version: 1,
+      auth: {
+        access: "access-123",
+        refresh: "refresh-123",
+        expires: callbackResult.expires,
+      },
+    });
+  });
+
+  test("persists oauth auth under the session directory when host worktree resolves to root", async () => {
+    const input = await createInput();
+    process.env.OPENCODE_SUPABASE_BROKER_URL = "https://example.com/broker";
+    const fetchMock = mock(async () =>
+      new Response(
+        JSON.stringify({
+          access_token: "access-123",
+          refresh_token: "refresh-123",
+          expires_in: 1800,
+          token_type: "bearer",
+        }),
+      )
+    );
+
+    const auth = createSupabaseAuth(
+      { ...input, worktree: "/" } as never,
+      {
+        clientId: "plugin-client",
+        oauthPort: 17661,
+      },
+      { fetch: fetchMock as unknown as FetchLike },
+    );
+
+    const result = await firstAuthMethod(auth).authorize();
+    const authUrl = new URL(result.url);
+    const redirectUri = new URL(requireSearchParam(authUrl, "redirect_uri"));
+    const state = requireSearchParam(authUrl, "state");
+
+    const pending = result.callback();
+    const response = await fetch(`${redirectUri.toString()}?code=code-123&state=${state}`);
+
+    expect(response.status).toBe(200);
+
+    const callbackResult = await pending;
+    expect(callbackResult).toMatchObject({
+      type: "success",
+      access: "access-123",
+      refresh: "refresh-123",
+    });
+    expect(typeof callbackResult.expires).toBe("number");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await expect(readSavedAuth({ ...input, worktree: "/" } as never)).resolves.toEqual({
+      version: 1,
+      auth: {
+        access: "access-123",
+        refresh: "refresh-123",
+        expires: callbackResult.expires,
+      },
+    });
+  });
+
+  test("persists oauth auth under the session directory when host worktree is unrelated", async () => {
+    const input = await createInput();
+    process.env.OPENCODE_SUPABASE_BROKER_URL = "https://example.com/broker";
+    const fetchMock = mock(async () =>
+      new Response(
+        JSON.stringify({
+          access_token: "access-123",
+          refresh_token: "refresh-123",
+          expires_in: 1800,
+          token_type: "bearer",
+        }),
+      )
+    );
+
+    const auth = createSupabaseAuth(
+      { ...input, worktree: resolve(input.worktree, "..", "unrelated") } as never,
+      {
+        clientId: "plugin-client",
+        oauthPort: 17662,
+      },
+      { fetch: fetchMock as unknown as FetchLike },
+    );
+
+    const result = await firstAuthMethod(auth).authorize();
+    const authUrl = new URL(result.url);
+    const redirectUri = new URL(requireSearchParam(authUrl, "redirect_uri"));
+    const state = requireSearchParam(authUrl, "state");
+
+    const pending = result.callback();
+    const response = await fetch(`${redirectUri.toString()}?code=code-123&state=${state}`);
+
+    expect(response.status).toBe(200);
+
+    const callbackResult = await pending;
+    expect(callbackResult).toMatchObject({
+      type: "success",
+      access: "access-123",
+      refresh: "refresh-123",
+    });
+    expect(typeof callbackResult.expires).toBe("number");
+    await expect(readSavedAuth({ ...input, worktree: "" } as never)).resolves.toEqual({
       version: 1,
       auth: {
         access: "access-123",

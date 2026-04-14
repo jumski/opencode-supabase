@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import type { ToolContext } from "@opencode-ai/plugin/tool";
 
 import { readSavedAuth, writeSavedAuth } from "../src/server/store.ts";
@@ -317,6 +317,66 @@ describe("server tools auth helper", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  test("uses session-scoped auth when worktree is unrelated", async () => {
+    const { input } = await createInput();
+    process.env.OPENCODE_SUPABASE_BROKER_URL = "https://example.com/broker";
+    await writeSavedAuth({ ...input, worktree: "" }, {
+      access: "saved-access",
+      refresh: "saved-refresh",
+      expires: Date.now() + 60_000,
+    });
+
+    const unrelatedInput = {
+      ...input,
+      worktree: resolve(input.worktree, "..", "unrelated"),
+    } satisfies TestPluginInput;
+
+    await expect(
+      ensureSupabaseToolAuth(
+        unrelatedInput,
+        {
+          clientId: "plugin-client",
+          oauthPort: 17680,
+        },
+        { fetch: mock(async () => new Response("unexpected")) },
+      ),
+    ).resolves.toEqual({
+      access: "saved-access",
+      refresh: "saved-refresh",
+      expires: expect.any(Number),
+    });
+  });
+
+  test("uses session-scoped auth when worktree resolves to root", async () => {
+    const { input } = await createInput();
+    process.env.OPENCODE_SUPABASE_BROKER_URL = "https://example.com/broker";
+    await writeSavedAuth({ ...input, worktree: "/" }, {
+      access: "saved-access",
+      refresh: "saved-refresh",
+      expires: Date.now() + 60_000,
+    });
+
+    const rootInput = {
+      ...input,
+      worktree: "/",
+    } satisfies TestPluginInput;
+
+    await expect(
+      ensureSupabaseToolAuth(
+        rootInput,
+        {
+          clientId: "plugin-client",
+          oauthPort: 17684,
+        },
+        { fetch: mock(async () => new Response("unexpected")) },
+      ),
+    ).resolves.toEqual({
+      access: "saved-access",
+      refresh: "saved-refresh",
+      expires: expect.any(Number),
+    });
+  });
+
   test("refreshes expired persisted auth through the broker before calling the management API", async () => {
     const { hostAuthSet, input } = await createInput();
     process.env.OPENCODE_SUPABASE_BROKER_URL = "https://example.com/broker";
@@ -375,6 +435,148 @@ describe("server tools auth helper", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(hostAuthSet).toHaveBeenCalledTimes(1);
     await expect(readSavedAuth(input)).resolves.toMatchObject({
+      version: 1,
+      auth: {
+        access: "fresh-access",
+        refresh: "fresh-refresh",
+      },
+    });
+  });
+
+  test("refreshes session-scoped auth when worktree is unrelated", async () => {
+    const { hostAuthSet, input } = await createInput();
+    process.env.OPENCODE_SUPABASE_BROKER_URL = "https://example.com/broker";
+    await writeSavedAuth({ ...input, worktree: "" }, {
+      access: "expired-access",
+      refresh: "saved-refresh",
+      expires: Date.now() - 1_000,
+    });
+
+    const unrelatedInput = {
+      ...input,
+      worktree: resolve(input.worktree, "..", "unrelated"),
+    } satisfies TestPluginInput;
+
+    const fetchMock: FetchLike = mock(async (request, init) => {
+      const url = String(request);
+      if (url === "https://example.com/broker/refresh") {
+        expect(init?.method).toBe("POST");
+        expect(JSON.parse(String(init?.body))).toEqual({
+          refresh_token: "saved-refresh",
+        });
+
+        return new Response(
+          JSON.stringify({
+            access_token: "fresh-access",
+            refresh_token: "fresh-refresh",
+            expires_in: 3600,
+            token_type: "bearer",
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        );
+      }
+
+      expect(url).toBe("https://api.supabase.com/v1/projects");
+      expect(init?.headers).toMatchObject({
+        Authorization: "Bearer fresh-access",
+        Accept: "application/json",
+      });
+
+      return new Response(JSON.stringify([{ id: "proj_unrelated_refresh" }]), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+
+    const tools = createSupabaseTools(
+      unrelatedInput,
+      {
+        clientId: "plugin-client",
+        oauthPort: 17682,
+      },
+      { fetch: fetchMock },
+    );
+
+    const result = await tools.supabase_list_projects.execute({}, createContext(unrelatedInput));
+
+    expect(result).toContain("proj_unrelated_refresh");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(hostAuthSet).toHaveBeenCalledTimes(1);
+    await expect(readSavedAuth({ ...input, worktree: "" })).resolves.toMatchObject({
+      version: 1,
+      auth: {
+        access: "fresh-access",
+        refresh: "fresh-refresh",
+      },
+    });
+  });
+
+  test("refreshes session-scoped auth when worktree resolves to root", async () => {
+    const { hostAuthSet, input } = await createInput();
+    process.env.OPENCODE_SUPABASE_BROKER_URL = "https://example.com/broker";
+    await writeSavedAuth({ ...input, worktree: "/" }, {
+      access: "expired-access",
+      refresh: "saved-refresh",
+      expires: Date.now() - 1_000,
+    });
+
+    const rootInput = {
+      ...input,
+      worktree: "/",
+    } satisfies TestPluginInput;
+
+    const fetchMock: FetchLike = mock(async (request, init) => {
+      const url = String(request);
+      if (url === "https://example.com/broker/refresh") {
+        expect(init?.method).toBe("POST");
+        expect(JSON.parse(String(init?.body))).toEqual({
+          refresh_token: "saved-refresh",
+        });
+
+        return new Response(
+          JSON.stringify({
+            access_token: "fresh-access",
+            refresh_token: "fresh-refresh",
+            expires_in: 3600,
+            token_type: "bearer",
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        );
+      }
+
+      expect(url).toBe("https://api.supabase.com/v1/projects");
+      expect(init?.headers).toMatchObject({
+        Authorization: "Bearer fresh-access",
+        Accept: "application/json",
+      });
+
+      return new Response(JSON.stringify([{ id: "proj_root_refresh" }]), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+
+    const tools = createSupabaseTools(
+      rootInput,
+      {
+        clientId: "plugin-client",
+        oauthPort: 17685,
+      },
+      { fetch: fetchMock },
+    );
+
+    const result = await tools.supabase_list_projects.execute({}, createContext(rootInput));
+
+    expect(result).toContain("proj_root_refresh");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(hostAuthSet).toHaveBeenCalledTimes(1);
+    await expect(readSavedAuth({ ...input, worktree: "/" })).resolves.toMatchObject({
       version: 1,
       auth: {
         access: "fresh-access",
@@ -527,6 +729,110 @@ describe("server tools auth helper", () => {
     ).rejects.toThrow("Supabase is not connected. Run /supabase first.");
 
     await expect(readSavedAuth(input)).resolves.toEqual({ version: 1 });
+  });
+
+  test("clears session-scoped auth when refresh is unauthorized and worktree is unrelated", async () => {
+    const { input } = await createInput();
+    process.env.OPENCODE_SUPABASE_BROKER_URL = "https://example.com/broker";
+    await writeSavedAuth({ ...input, worktree: "" }, {
+      access: "expired-access",
+      refresh: "bad-refresh",
+      expires: Date.now() - 1_000,
+    });
+
+    const unrelatedInput = {
+      ...input,
+      worktree: resolve(input.worktree, "..", "unrelated"),
+    } satisfies TestPluginInput;
+
+    const fetchMock: FetchLike = mock(async (request) => {
+      const url = String(request);
+      if (url === "https://example.com/broker/refresh") {
+        return new Response(
+          JSON.stringify({
+            error: {
+              code: "unauthorized",
+              message: "refresh token invalid",
+            },
+          }),
+          { status: 401, headers: { "Content-Type": "application/json" } },
+        );
+      }
+
+      if (url === `http://127.0.0.1:7777/auth/supabase?directory=${encodeURIComponent(input.directory)}`) {
+        return new Response(JSON.stringify(true), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      throw new Error(`unexpected url: ${url}`);
+    });
+
+    await expect(
+      ensureSupabaseToolAuth(
+        unrelatedInput,
+        {
+          clientId: "plugin-client",
+          oauthPort: 17683,
+        },
+        { fetch: fetchMock },
+      ),
+    ).rejects.toThrow("Supabase is not connected. Run /supabase first.");
+
+    await expect(readSavedAuth({ ...input, worktree: "" })).resolves.toEqual({ version: 1 });
+  });
+
+  test("clears session-scoped auth when refresh is unauthorized and worktree resolves to root", async () => {
+    const { input } = await createInput();
+    process.env.OPENCODE_SUPABASE_BROKER_URL = "https://example.com/broker";
+    await writeSavedAuth({ ...input, worktree: "/" }, {
+      access: "expired-access",
+      refresh: "bad-refresh",
+      expires: Date.now() - 1_000,
+    });
+
+    const rootInput = {
+      ...input,
+      worktree: "/",
+    } satisfies TestPluginInput;
+
+    const fetchMock: FetchLike = mock(async (request) => {
+      const url = String(request);
+      if (url === "https://example.com/broker/refresh") {
+        return new Response(
+          JSON.stringify({
+            error: {
+              code: "unauthorized",
+              message: "refresh token invalid",
+            },
+          }),
+          { status: 401, headers: { "Content-Type": "application/json" } },
+        );
+      }
+
+      if (url === `http://127.0.0.1:7777/auth/supabase?directory=${encodeURIComponent(input.directory)}`) {
+        return new Response(JSON.stringify(true), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      throw new Error(`unexpected url: ${url}`);
+    });
+
+    await expect(
+      ensureSupabaseToolAuth(
+        rootInput,
+        {
+          clientId: "plugin-client",
+          oauthPort: 17686,
+        },
+        { fetch: fetchMock },
+      ),
+    ).rejects.toThrow("Supabase is not connected. Run /supabase first.");
+
+    await expect(readSavedAuth({ ...input, worktree: "/" })).resolves.toEqual({ version: 1 });
   });
 
   test("lists organizations for the authenticated user", async () => {
