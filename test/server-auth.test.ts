@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
-import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { createSupabaseAuth, stopSupabaseAuthServer } from "../src/server/auth.ts";
 import { readSavedAuth } from "../src/server/store.ts";
@@ -20,11 +20,23 @@ async function createInput() {
   };
 }
 
+function firstAuthMethod(auth: ReturnType<typeof createSupabaseAuth>) {
+  const method = auth.methods[0];
+  if (!method) throw new Error("Expected an auth method");
+  return method;
+}
+
+function requireSearchParam(url: URL, key: string) {
+  const value = url.searchParams.get(key);
+  if (!value) throw new Error(`Missing ${key}`);
+  return value;
+}
+
 afterEach(async () => {
   await stopSupabaseAuthServer();
   await Promise.all(cleanupPaths.splice(0).map((path) => rm(path, { force: true, recursive: true })));
   if (originalBrokerUrl === undefined) {
-    delete process.env.OPENCODE_SUPABASE_BROKER_URL;
+    process.env.OPENCODE_SUPABASE_BROKER_URL = undefined;
   } else {
     process.env.OPENCODE_SUPABASE_BROKER_URL = originalBrokerUrl;
   }
@@ -56,10 +68,10 @@ describe("server auth hook", () => {
       },
     );
 
-    const result = await auth.methods[0]!.authorize();
+    const result = await firstAuthMethod(auth).authorize();
     const authUrl = new URL(result.url);
-    const redirectUri = new URL(authUrl.searchParams.get("redirect_uri")!);
-    const state = authUrl.searchParams.get("state");
+    const redirectUri = new URL(requireSearchParam(authUrl, "redirect_uri"));
+    const state = requireSearchParam(authUrl, "state");
 
     const pending = result.callback();
     await fetch(`${redirectUri.toString()}?code=code-123&state=${state}`);
@@ -102,10 +114,10 @@ describe("server auth hook", () => {
       },
     );
 
-    const result = await auth.methods[0]!.authorize();
+    const result = await firstAuthMethod(auth).authorize();
     const authUrl = new URL(result.url);
-    const redirectUri = new URL(authUrl.searchParams.get("redirect_uri")!);
-    const state = authUrl.searchParams.get("state");
+    const redirectUri = new URL(requireSearchParam(authUrl, "redirect_uri"));
+    const state = requireSearchParam(authUrl, "state");
 
     const pending = result.callback();
     pending.catch(() => undefined);
@@ -133,10 +145,10 @@ describe("server auth hook", () => {
       },
     );
 
-    const result = await auth.methods[0]!.authorize();
+    const result = await firstAuthMethod(auth).authorize();
     const authUrl = new URL(result.url);
-    const redirectUri = new URL(authUrl.searchParams.get("redirect_uri")!);
-    const state = authUrl.searchParams.get("state");
+    const redirectUri = new URL(requireSearchParam(authUrl, "redirect_uri"));
+    const state = requireSearchParam(authUrl, "state");
 
     const pending = result.callback();
     pending.catch(() => undefined);
@@ -169,7 +181,7 @@ describe("server auth hook", () => {
       },
     );
 
-    const result = await auth.methods[0]!.authorize();
+    const result = await firstAuthMethod(auth).authorize();
     await expect(result.callback()).rejects.toThrow("OAuth callback timeout - authorization took too long");
 
     const logEntries = write.mock.calls.map((call) => JSON.stringify(((call as unknown) as [unknown])[0]));
@@ -199,7 +211,7 @@ describe("server auth hook", () => {
       },
     );
 
-    const result = await auth.methods[0]?.authorize();
+    const result = await firstAuthMethod(auth).authorize();
     void result?.callback().catch(() => undefined);
 
     expect(result?.method).toBe("auto");
@@ -236,9 +248,9 @@ describe("server auth hook", () => {
       },
     );
 
-    const result = await auth.methods[0]?.authorize();
+    const result = await firstAuthMethod(auth).authorize();
     void result?.callback().catch(() => undefined);
-    const redirectUri = new URL(new URL(String(result?.url)).searchParams.get("redirect_uri")!);
+    const redirectUri = new URL(requireSearchParam(new URL(String(result.url)), "redirect_uri"));
 
     const response = await fetch(`${redirectUri.toString()}?code=code-123`);
     const html = await response.text();
@@ -287,10 +299,10 @@ describe("server auth hook", () => {
       { fetch: fetchMock as unknown as FetchLike },
     );
 
-    const result = await auth.methods[0]!.authorize();
+    const result = await firstAuthMethod(auth).authorize();
     const authUrl = new URL(result.url);
-    const redirectUri = new URL(authUrl.searchParams.get("redirect_uri")!);
-    const state = authUrl.searchParams.get("state");
+    const redirectUri = new URL(requireSearchParam(authUrl, "redirect_uri"));
+    const state = requireSearchParam(authUrl, "state");
 
     const pending = result.callback();
     const response = await fetch(`${redirectUri.toString()}?code=code-123&state=${state}`);

@@ -1,15 +1,15 @@
-import type { ToolContext } from "@opencode-ai/plugin/tool";
 import { afterEach, describe, expect, mock, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
-import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
+import type { ToolContext } from "@opencode-ai/plugin/tool";
 
+import { readSavedAuth, writeSavedAuth } from "../src/server/store.ts";
 import {
+  type SupabaseToolInput,
   createSupabaseTools,
   ensureSupabaseToolAuth,
-  type SupabaseToolInput,
 } from "../src/server/tools.ts";
-import { readSavedAuth, writeSavedAuth } from "../src/server/store.ts";
 import { createSupabaseLogger } from "../src/shared/log.ts";
 import type { FetchLike } from "../src/shared/types.ts";
 
@@ -64,7 +64,7 @@ function createContext(input: TestPluginInput): TestToolContext {
 afterEach(async () => {
   await Promise.all(cleanupPaths.splice(0).map((path) => rm(path, { force: true, recursive: true })));
   if (originalBrokerUrl === undefined) {
-    delete process.env.OPENCODE_SUPABASE_BROKER_URL;
+    process.env.OPENCODE_SUPABASE_BROKER_URL = undefined;
   } else {
     process.env.OPENCODE_SUPABASE_BROKER_URL = originalBrokerUrl;
   }
@@ -255,7 +255,7 @@ describe("server tools auth helper", () => {
         );
       }
 
-      if (url === "http://127.0.0.1:7777/auth/supabase?directory=" + encodeURIComponent(input.directory)) {
+      if (url === `http://127.0.0.1:7777/auth/supabase?directory=${encodeURIComponent(input.directory)}`) {
         return new Response(JSON.stringify(true), {
           status: 200,
           headers: { "Content-Type": "application/json" },
@@ -508,7 +508,7 @@ describe("server tools auth helper", () => {
         );
       }
 
-      if (url === "http://127.0.0.1:7777/auth/supabase?directory=" + encodeURIComponent(input.directory)) {
+      if (url === `http://127.0.0.1:7777/auth/supabase?directory=${encodeURIComponent(input.directory)}`) {
         throw new Error("delete failed");
       }
 

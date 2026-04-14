@@ -23,6 +23,8 @@
     "tui"
   ],
   "scripts": {
+    "lint": "biome check .",
+    "verify:pack": "npm pack --dry-run",
     "typecheck": "bunx tsc --noEmit",
     "test": "bun test"
   },
@@ -33,6 +35,7 @@
     "zod": "latest"
   },
   "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
     "@opentui/core": "0.1.95",
     "@opentui/solid": "0.1.95",
     "@types/bun": "latest",

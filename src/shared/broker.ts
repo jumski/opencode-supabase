@@ -1,5 +1,5 @@
-import type { FetchLike, SupabaseTokenResponse } from "./types.ts";
 import type { SupabaseLogger } from "./log.ts";
+import type { FetchLike, SupabaseTokenResponse } from "./types.ts";
 
 export type BrokerConfig = {
   baseUrl: string;

@@ -1,16 +1,16 @@
 import type { PluginOptions } from "@opencode-ai/plugin";
-import type { ToolContext } from "@opencode-ai/plugin/tool";
 import { tool } from "@opencode-ai/plugin";
+import type { ToolContext } from "@opencode-ai/plugin/tool";
 
+import { supabaseManagementApiFetch } from "../shared/api.ts";
 import {
   BrokerClientError,
   refreshTokenThroughBroker,
 } from "../shared/broker.ts";
-import { supabaseManagementApiFetch } from "../shared/api.ts";
 import { readSupabaseConfig } from "../shared/cfg.ts";
 import type { SupabaseLogger } from "../shared/log.ts";
 import type { FetchLike } from "../shared/types.ts";
-import { clearSavedAuth, readSavedAuth, writeSavedAuth, type SavedAuth } from "./store.ts";
+import { type SavedAuth, clearSavedAuth, readSavedAuth, writeSavedAuth } from "./store.ts";
 
 type ToolDeps = {
   fetch?: FetchLike;
