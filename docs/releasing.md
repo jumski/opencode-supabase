@@ -33,7 +33,8 @@ This doc also acts as the transfer checklist for moving the repo to `supabase-co
 
 ### GitHub
 
-- Create label: `no-changeset`
+- Create required labels:
+  - `no-changeset` for PRs that should skip Changesets enforcement
 - Protect `main`
 - Require PR review before merge
 - Require status checks before merge:
@@ -41,6 +42,20 @@ This doc also acts as the transfer checklist for moving the repo to `supabase-co
   - `changeset-check`
 - Ensure GitHub Actions are enabled
 - Ensure default branch is `main`
+
+Create the required label with GitHub CLI:
+
+```bash
+gh label create "no-changeset" \
+  --description "Skip changeset requirement for non-user-visible changes" \
+  --color FBCA04
+```
+
+If the label already exists, this command will fail; check current labels with:
+
+```bash
+gh label list
+```
 
 ## Contributor Workflow
 
@@ -163,12 +178,21 @@ When the repo moves:
 - verify GitHub Actions remain enabled
 - verify the default branch is still `main`
 - recreate or rotate `NPM_TOKEN`
-- recreate the `no-changeset` label if missing
+- recreate required labels if missing:
+  - `no-changeset`
 - reapply branch protection rules
 - confirm npm package ownership includes the new maintainers or org
 - verify workflow permissions still allow release PR creation and publish
 - run one test release after transfer
 - re-evaluate migration to trusted publishing after transfer
+
+Recommended post-transfer label command:
+
+```bash
+gh label create "no-changeset" \
+  --description "Skip changeset requirement for non-user-visible changes" \
+  --color FBCA04
+```
 
 ## First Release Checklist
 
@@ -201,4 +225,10 @@ Publish locally if ever needed for debugging only:
 
 ```bash
 bun run release
+```
+
+List current labels:
+
+```bash
+gh label list
 ```
