@@ -1,8 +1,8 @@
 import { expect, test } from "bun:test";
 
+import serverModule from "../src/server/index.ts";
 import { createSupabaseCommand } from "../src/tui/commands.ts";
 import { SupabaseDialog } from "../src/tui/dialog.tsx";
-import serverModule from "../src/server/index.ts";
 import tuiModule from "../src/tui/index.tsx";
 
 test("server plugin exports supabase id and server hook", () => {
@@ -124,7 +124,7 @@ test("supabase dialog treats boolean callback success as connected", async () =>
         },
       },
     },
-  } as any;
+  } as unknown as Parameters<typeof SupabaseDialog>[0]["api"];
 
   const logger = {
     debug: () => Promise.resolve(),
@@ -175,17 +175,21 @@ test("supabase dialog logs auth milestones without leaking oauth query values", 
         },
       },
     },
-  } as any;
+  } as unknown as Parameters<typeof SupabaseDialog>[0]["api"];
 
   const logger = {
-    debug: (message: string, extra?: Record<string, unknown>) =>
-      api.client.app.log({ service: "opencode-supabase", level: "debug", message, extra }),
-    info: (message: string, extra?: Record<string, unknown>) =>
-      api.client.app.log({ service: "opencode-supabase", level: "info", message, extra }),
-    warn: (message: string, extra?: Record<string, unknown>) =>
-      api.client.app.log({ service: "opencode-supabase", level: "warn", message, extra }),
-    error: (message: string, extra?: Record<string, unknown>) =>
-      api.client.app.log({ service: "opencode-supabase", level: "error", message, extra }),
+    debug: async (message: string, extra?: Record<string, unknown>) => {
+      await api.client.app.log({ service: "opencode-supabase", level: "debug", message, extra });
+    },
+    info: async (message: string, extra?: Record<string, unknown>) => {
+      await api.client.app.log({ service: "opencode-supabase", level: "info", message, extra });
+    },
+    warn: async (message: string, extra?: Record<string, unknown>) => {
+      await api.client.app.log({ service: "opencode-supabase", level: "warn", message, extra });
+    },
+    error: async (message: string, extra?: Record<string, unknown>) => {
+      await api.client.app.log({ service: "opencode-supabase", level: "error", message, extra });
+    },
   };
 
   const dialog = SupabaseDialog({ api, logger, onClose: () => api.ui.dialog.clear() }) as {

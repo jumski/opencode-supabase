@@ -1,6 +1,6 @@
-import type { PluginInput } from "@opencode-ai/plugin";
 import { mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import type { PluginInput } from "@opencode-ai/plugin";
 
 type StoreInput = Pick<PluginInput, "directory" | "worktree">;
 

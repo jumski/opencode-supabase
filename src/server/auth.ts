@@ -1,10 +1,10 @@
-import type { PluginInput, PluginOptions } from "@opencode-ai/plugin";
 import { createConnection } from "node:net";
+import type { PluginInput, PluginOptions } from "@opencode-ai/plugin";
 
 import {
   BrokerClientError,
-  exchangeCodeThroughBroker,
   type BrokerConfig,
+  exchangeCodeThroughBroker,
 } from "../shared/broker.ts";
 import { readSupabaseConfig } from "../shared/cfg.ts";
 import type { SupabaseLogger } from "../shared/log.ts";

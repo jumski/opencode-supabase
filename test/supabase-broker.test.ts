@@ -1,7 +1,7 @@
 import { describe, expect, mock, test } from "bun:test";
 
-import { buildConfigFromEnv, brokerHandler, handleBrokerRequest } from "../supabase/functions/opencode-supabase-broker/index.ts";
 import { handleExchangeRequest, handleRefreshRequest } from "../supabase/functions/opencode-supabase-broker/handlers.ts";
+import { brokerHandler, buildConfigFromEnv, handleBrokerRequest } from "../supabase/functions/opencode-supabase-broker/index.ts";
 import { BrokerConfigError } from "../supabase/functions/opencode-supabase-broker/types.ts";
 import type { BrokerConfig, TokenResponse } from "../supabase/functions/opencode-supabase-broker/types.ts";
 

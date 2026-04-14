@@ -1,22 +1,22 @@
 import { describe, expect, mock, test } from "bun:test";
 
 import {
-  BrokerClientError,
-  exchangeCodeThroughBroker,
-  refreshTokenThroughBroker,
-} from "../src/shared/broker.ts";
-import {
   DEFAULT_SUPABASE_API_BASE_URL,
   DEFAULT_SUPABASE_OAUTH_AUTHORIZE_URL,
   DEFAULT_SUPABASE_OAUTH_CLIENT_ID,
   DEFAULT_SUPABASE_OAUTH_PORT,
 } from "../src/shared/api.ts";
+import {
+  BrokerClientError,
+  exchangeCodeThroughBroker,
+  refreshTokenThroughBroker,
+} from "../src/shared/broker.ts";
 import { readSupabaseConfig } from "../src/shared/cfg.ts";
 import {
-  createSupabaseLogger,
-  createServerLogWriter,
-  createTuiLogWriter,
   type LogEntry,
+  createServerLogWriter,
+  createSupabaseLogger,
+  createTuiLogWriter,
 } from "../src/shared/log.ts";
 import { buildAuthorizeUrl } from "../src/shared/oauth.ts";
 import type { FetchLike } from "../src/shared/types.ts";
@@ -201,7 +201,7 @@ describe("server log writer", () => {
     await write(entry);
 
     expect(logCalls).toHaveLength(1);
-    expect(logCalls[0]!.body).toEqual(entry);
+    expect(logCalls[0]?.body).toEqual(entry);
   });
 });
 
@@ -222,8 +222,8 @@ describe("tui log writer", () => {
     await write(entry);
 
     expect(logCalls).toHaveLength(1);
-    expect(logCalls[0]!.params).toEqual(entry);
-    expect(logCalls[0]!.options.throwOnError).toBe(true);
+    expect(logCalls[0]?.params).toEqual(entry);
+    expect(logCalls[0]?.options.throwOnError).toBe(true);
   });
 });
 
