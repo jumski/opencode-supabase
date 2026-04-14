@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { resolve, join } from "node:path";
+import { join, resolve } from "node:path";
 
 import { createSupabaseAuth, stopSupabaseAuthServer } from "../src/server/auth.ts";
 import { readSavedAuth } from "../src/server/store.ts";
