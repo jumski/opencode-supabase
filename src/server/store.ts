@@ -17,6 +17,8 @@ export type SavedState = {
 
 const STORE_FILE = "supabase-auth.json";
 
+// Use worktree only when it is non-root and directory is equal to or inside it;
+// otherwise fall back to the session directory.
 function resolveStoreRoot(input: StoreInput): string {
   const directory = resolve(input.directory);
   if (!input.worktree) {
