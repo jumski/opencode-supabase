@@ -1,5 +1,5 @@
 import { mkdir } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import type { PluginInput } from "@opencode-ai/plugin";
 
 type StoreInput = Pick<PluginInput, "directory" | "worktree">;
@@ -17,8 +17,31 @@ export type SavedState = {
 
 const STORE_FILE = "supabase-auth.json";
 
+function resolveStoreRoot(input: StoreInput): string {
+  const directory = resolve(input.directory);
+  if (!input.worktree) {
+    return directory;
+  }
+
+  const worktree = resolve(input.worktree);
+  if (worktree === dirname(worktree)) {
+    return directory;
+  }
+
+  const pathFromWorktree = relative(worktree, directory);
+  if (
+    pathFromWorktree === "" ||
+    pathFromWorktree === "." ||
+    (!pathFromWorktree.startsWith("..") && !pathFromWorktree.startsWith(`..${sep}`))
+  ) {
+    return worktree;
+  }
+
+  return directory;
+}
+
 export function file(input: StoreInput): string {
-  const root = input.worktree && input.worktree !== "/" ? input.worktree : input.directory;
+  const root = resolveStoreRoot(input);
   return join(root, ".opencode", STORE_FILE);
 }
 

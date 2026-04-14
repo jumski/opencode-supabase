@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { resolve, join } from "node:path";
 
 import { clearSavedAuth, getStoreFile, readSavedAuth, writeSavedAuth } from "../src/server/store.ts";
 
@@ -82,6 +82,22 @@ describe("server auth store", () => {
     const input = await createInput();
 
     expect(getStoreFile({ ...input, worktree: "/" })).toBe(
+      join(input.directory, ".opencode", "supabase-auth.json"),
+    );
+  });
+
+  test("falls back to the session directory when worktree is unrelated", async () => {
+    const input = await createInput();
+
+    expect(getStoreFile({ ...input, worktree: resolve(input.worktree, "..", "unrelated") })).toBe(
+      join(input.directory, ".opencode", "supabase-auth.json"),
+    );
+  });
+
+  test("falls back to the session directory when worktree is nested inside the directory", async () => {
+    const input = await createInput();
+
+    expect(getStoreFile({ ...input, worktree: join(input.directory, "nested") })).toBe(
       join(input.directory, ".opencode", "supabase-auth.json"),
     );
   });
