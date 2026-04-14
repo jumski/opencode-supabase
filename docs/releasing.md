@@ -57,6 +57,40 @@ If the label already exists, this command will fail; check current labels with:
 gh label list
 ```
 
+Apply the expected branch protection with GitHub CLI:
+
+```bash
+gh api --method PUT repos/<owner>/<repo>/branches/main/protection --input - <<'EOF'
+{
+  "required_status_checks": {
+    "strict": true,
+    "contexts": ["core", "changeset-check"]
+  },
+  "enforce_admins": false,
+  "required_pull_request_reviews": {
+    "required_approving_review_count": 1,
+    "dismiss_stale_reviews": false,
+    "require_code_owner_reviews": false,
+    "require_last_push_approval": false
+  },
+  "restrictions": null,
+  "required_linear_history": false,
+  "allow_force_pushes": false,
+  "allow_deletions": false,
+  "block_creations": false,
+  "required_conversation_resolution": false,
+  "lock_branch": false,
+  "allow_fork_syncing": false
+}
+EOF
+```
+
+Verify branch protection:
+
+```bash
+gh api repos/<owner>/<repo>/branches/main/protection
+```
+
 ## Contributor Workflow
 
 Add a changeset for user-visible or package-relevant changes:
@@ -192,6 +226,34 @@ Recommended post-transfer label command:
 gh label create "no-changeset" \
   --description "Skip changeset requirement for non-user-visible changes" \
   --color FBCA04
+```
+
+Recommended post-transfer branch-protection command:
+
+```bash
+gh api --method PUT repos/<owner>/<repo>/branches/main/protection --input - <<'EOF'
+{
+  "required_status_checks": {
+    "strict": true,
+    "contexts": ["core", "changeset-check"]
+  },
+  "enforce_admins": false,
+  "required_pull_request_reviews": {
+    "required_approving_review_count": 1,
+    "dismiss_stale_reviews": false,
+    "require_code_owner_reviews": false,
+    "require_last_push_approval": false
+  },
+  "restrictions": null,
+  "required_linear_history": false,
+  "allow_force_pushes": false,
+  "allow_deletions": false,
+  "block_creations": false,
+  "required_conversation_resolution": false,
+  "lock_branch": false,
+  "allow_fork_syncing": false
+}
+EOF
 ```
 
 ## First Release Checklist
