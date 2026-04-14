@@ -29,7 +29,27 @@ This doc also acts as the transfer checklist for moving the repo to `supabase-co
 
 - Ensure the `opencode-supabase` package is owned by the intended npm maintainer or org.
 - Create an npm automation token for publishing.
+- Token requirements on npmjs.com:
+  - token type: `Automation`
+  - access needed: publish rights for the `opencode-supabase` package
+  - 2FA behavior: automation tokens are intended for CI publish flows and work without interactive OTP prompts
+  - package/org alignment: the npm user that creates the token must already be allowed to publish `opencode-supabase`, or the org must grant that permission before release day
+  - if the package is moved to a different npm org later, create a new token from a maintainer account in that org
 - Add the token to GitHub Actions secrets as `NPM_TOKEN`.
+
+Recommended creation checklist in npmjs.com:
+
+1. Sign in as a maintainer that can publish `opencode-supabase`.
+2. Go to Access Tokens.
+3. Create a new `Automation` token.
+4. Store it immediately in GitHub Actions secrets as `NPM_TOKEN`.
+5. Do not reuse a broad personal token if a package-scoped or org-appropriate maintainer token is available.
+
+Quick validation before first release:
+
+- confirm the package name on npm is exactly `opencode-supabase`
+- confirm the token-owning npm account can publish that package
+- confirm `NPM_TOKEN` is present in GitHub repository secrets
 
 ### GitHub
 
