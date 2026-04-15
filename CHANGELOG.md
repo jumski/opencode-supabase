@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.0.6
+
+### Patch Changes
+
+- d64d8f3: Dummy release test for Changesets workflow.
+
 All notable changes to this project will be documented in this file.
 
 ## 0.0.5 - 2026-04-14
