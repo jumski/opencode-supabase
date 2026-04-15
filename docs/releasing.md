@@ -179,9 +179,7 @@ Expected scripts in `package.json`:
 
 Current choice: `NPM_TOKEN` with Changesets-only auth
 
-Auth model: `changesets/action` manages npm authentication by creating an ephemeral `.npmrc` from `NPM_TOKEN` at publish time. The `release.yml` workflow does not use `setup-node` `registry-url` and does not map `NODE_AUTH_TOKEN`. No committed `.npmrc` exists in the repo.
-
-A fast-fail `Verify NPM_TOKEN` step runs before publish to catch missing tokens early with a clear error message: `NPM_TOKEN is not set`.
+Auth model: `changesets/action` manages npm authentication by creating an ephemeral `.npmrc` from `NPM_TOKEN` only when the workflow reaches the publish path. The `release.yml` workflow does not use `setup-node` `registry-url` and does not map `NODE_AUTH_TOKEN`. No committed `.npmrc` exists in the repo.
 
 Why:
 
@@ -209,7 +207,7 @@ Future hardening:
 
 ### Release workflow fails because `NPM_TOKEN` is missing
 
-- The `Verify NPM_TOKEN` step will fail with `NPM_TOKEN is not set` before any publish attempt
+- A publish attempt will fail inside `changesets/action` if `NPM_TOKEN` is missing or invalid
 - add or fix `NPM_TOKEN` in GitHub repository secrets
 - rerun the failed workflow or push a follow-up commit if needed
 

@@ -32,11 +32,6 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Verify NPM_TOKEN
-        run: test -n "$NPM_TOKEN" || (echo "NPM_TOKEN is not set" && exit 1)
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-
       - name: Create Release Pull Request or Publish
         id: changesets
         uses: changesets/action@v1
