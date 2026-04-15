@@ -17,6 +17,7 @@ This doc also acts as the transfer checklist for moving the repo to `supabase-co
 ## Current Release Model
 
 - Package manager: Bun
+- Node version: 24
 - Registry: npm
 - Versioning and changelog: Changesets
 - Publish trigger: merge release PR on `main`
@@ -176,12 +177,17 @@ Expected scripts in `package.json`:
 
 ## Security Posture
 
-Current choice: `NPM_TOKEN`
+Current choice: `NPM_TOKEN` with Changesets-only auth
+
+Auth model: `changesets/action` manages npm authentication by creating an ephemeral `.npmrc` from `NPM_TOKEN` at publish time. The `release.yml` workflow does not use `setup-node` `registry-url` and does not map `NODE_AUTH_TOKEN`. No committed `.npmrc` exists in the repo.
+
+A fast-fail `Verify NPM_TOKEN` step runs before publish to catch missing tokens early with a clear error message: `NPM_TOKEN is not set`.
 
 Why:
 
 - fastest path to the first release
 - simple to configure
+- single auth path: one token, one mechanism
 - good enough for the initial rollout on protected `main`
 
 Rules:
@@ -203,7 +209,8 @@ Future hardening:
 
 ### Release workflow fails because `NPM_TOKEN` is missing
 
-- add or fix `NPM_TOKEN`
+- The `Verify NPM_TOKEN` step will fail with `NPM_TOKEN is not set` before any publish attempt
+- add or fix `NPM_TOKEN` in GitHub repository secrets
 - rerun the failed workflow or push a follow-up commit if needed
 
 ### PR fails `changeset-check`
@@ -237,6 +244,7 @@ When the repo moves:
 - reapply branch protection rules
 - confirm npm package ownership includes the new maintainers or org
 - verify workflow permissions still allow release PR creation and publish
+- verify `release.yml` auth still works — the workflow relies on `changesets/action` managing `.npmrc` from `NPM_TOKEN`, with no committed `.npmrc` and no `setup-node` `registry-url`
 - run one test release after transfer
 - re-evaluate migration to trusted publishing after transfer
 
