@@ -45,3 +45,17 @@ Then share that newest session log file in the issue. In our testing, the sessio
 ## Reference
 
 - Supabase Management API: https://supabase.com/docs/reference/api/introduction
+
+## Releasing
+
+For user-visible or package-relevant changes, add a changeset in your PR:
+
+```bash
+bun run changeset
+```
+
+Commit the generated `.changeset/*.md` file with your code change.
+
+Maintainers use a release PR workflow driven by Changesets. Internal-only changes can use the `no-changeset` label when appropriate.
+
+See `docs/releasing.md` for the full maintainer runbook.
