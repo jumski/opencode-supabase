@@ -18,6 +18,17 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.CHANGESETS_TOKEN }}
+
+      - name: Verify CHANGESETS_TOKEN
+        run: |
+          if [ -z "$CHANGESETS_TOKEN" ]; then
+            echo "::error::CHANGESETS_TOKEN secret is missing or empty. See docs/releasing.md > One-Time Setup > GitHub."
+            exit 1
+          fi
+        env:
+          CHANGESETS_TOKEN: ${{ secrets.CHANGESETS_TOKEN }}
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -39,5 +50,5 @@ jobs:
           version: bun run version-packages
           publish: bun run release
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.CHANGESETS_TOKEN }}
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}

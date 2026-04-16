@@ -54,6 +54,28 @@ Quick validation before first release:
 
 ### GitHub
 
+- Create a fine-grained personal access token for changesets:
+  - Go to GitHub Settings > Developer settings > Fine-grained tokens
+  - Repository access: only this repository
+  - Token expiration: maximum allowed (1 year). Set a calendar reminder to renew at ~10 months.
+  - Permissions:
+
+    | Permission    | Access       | Why                                                      |
+    | ------------- | ------------ | -------------------------------------------------------- |
+    | Contents      | Read and write | Checkout, push version commits, create release PR branch |
+    | Pull requests | Read and write | Create and update the Version Packages PR                |
+    | Metadata      | Read         | Required by GitHub for all API access                    |
+
+    Note: The "Workflows" permission is **not** needed. Only the built-in `GITHUB_TOKEN` cannot trigger other workflows; a PAT push triggers CI automatically.
+
+  - Add the token as GitHub Actions secret `CHANGESETS_TOKEN`
+  - Why: `GITHUB_TOKEN` pushes from GitHub Actions do not trigger other workflows. The changesets release PR would never get CI checks without a separate token. See [GitHub docs on GITHUB_TOKEN limitations](https://docs.github.com/en/actions/concepts/security/github_token#when-github_token-triggers-workflow-runs).
+  - Ownership: the token is tied to the GitHub account that created it. If that account leaves the org or is deactivated, the token stops working immediately. Prefer creating the token from a shared bot account or a team-owned account. If neither is available, document which maintainer owns the token and track renewal in a shared calendar.
+  - Renewal steps:
+    1. Create a new fine-grained PAT with the same permissions listed above.
+    2. Update the `CHANGESETS_TOKEN` GitHub Actions secret with the new value.
+    3. Delete the old token in GitHub Settings > Developer settings > Fine-grained tokens.
+    4. Re-trigger the Release workflow to verify the new token works.
 - Create required labels:
   - `no-changeset` for PRs that should skip Changesets enforcement
 - Protect `main`
@@ -216,6 +238,12 @@ Future hardening:
 - add a real changeset with `bun run changeset`
 - or apply `no-changeset` if the PR truly has no consumer-visible impact
 
+### Release PR has no CI checks
+
+- `GITHUB_TOKEN` pushes do not trigger workflows — this is a GitHub Actions limitation
+- Verify `CHANGESETS_TOKEN` is configured correctly (see [One-Time Setup > GitHub](#github))
+- Re-trigger the Release workflow after fixing the secret
+
 ### Bad release PR contents
 
 - do not merge
@@ -237,6 +265,7 @@ When the repo moves:
 - verify GitHub Actions remain enabled
 - verify the default branch is still `main`
 - recreate or rotate `NPM_TOKEN`
+- recreate `CHANGESETS_TOKEN` fine-grained PAT (the old token is scoped to the original repo and will not transfer); see [One-Time Setup > GitHub](#github) for required permissions and creation steps
 - recreate required labels if missing:
   - `no-changeset`
 - reapply branch protection rules
@@ -286,6 +315,7 @@ EOF
 
 - Changesets setup branch merged
 - `NPM_TOKEN` configured
+- `CHANGESETS_TOKEN` configured
 - `no-changeset` label exists
 - branch protection configured
 - real bugfix PR includes a real changeset
