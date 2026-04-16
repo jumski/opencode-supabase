@@ -44,6 +44,7 @@ jobs:
   changeset-check:
     runs-on: ubuntu-latest
     env:
+      # Keep the required job green on release/no-changeset PRs while only running the real check for normal PRs.
       SHOULD_RUN_CHANGESET_CHECK: ${{ github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'no-changeset') && !startsWith(github.head_ref, 'changeset-release/') }}
     steps:
       - name: Checkout
