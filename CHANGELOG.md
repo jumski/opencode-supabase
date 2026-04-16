@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.0.7
+
+### Patch Changes
+
+- 34202de: Fix Supabase OAuth callback collisions by retrying a fixed localhost callback window (`14589`-`14591`) and stopping the callback listener as soon as auth finishes.
+
 ## 0.0.6
 
 ### Patch Changes
