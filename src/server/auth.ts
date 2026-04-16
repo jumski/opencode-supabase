@@ -15,6 +15,7 @@ import { writeSavedAuth } from "./store.ts";
 
 const CALLBACK_PATH = "/auth/callback";
 const CALLBACK_TIMEOUT_MS = 5 * 60 * 1000;
+const CALLBACK_PORTS = [14589, 14590, 14591] as const;
 
 type PendingAuth = {
   codeVerifier: string;
@@ -25,6 +26,7 @@ type PendingAuth = {
 };
 
 type AuthDeps = {
+  callbackPorts?: number[];
   fetch?: FetchLike;
   logger?: SupabaseLogger;
   setCallbackTimeout?: typeof setTimeout;
@@ -36,6 +38,13 @@ const pendingAuths = new Map<string, PendingAuth>();
 
 function callbackUrl(port: number) {
   return `http://localhost:${port}${CALLBACK_PATH}`;
+}
+
+function normalizeCallbackPorts(ports: readonly number[]) {
+  if (ports.length === 0) {
+    throw new Error("Supabase callback ports must not be empty");
+  }
+  return [...ports];
 }
 
 async function isPortInUse(port: number) {
@@ -52,139 +61,183 @@ async function isPortInUse(port: number) {
 }
 
 async function ensureServer(
-  port: number,
-  config: ReturnType<typeof readSupabaseConfig>,
+  callbackPorts: readonly number[],
+  _config: ReturnType<typeof readSupabaseConfig>,
   input: Pick<PluginInput, "directory" | "worktree">,
   deps: AuthDeps,
 ) {
+  const candidatePorts = normalizeCallbackPorts(callbackPorts);
+
   if (server) {
-    if (serverPort !== port) {
+    if (!serverPort || !candidatePorts.includes(serverPort)) {
       throw new Error(`Supabase callback server already running on port ${serverPort}`);
     }
-    return;
-  }
-
-  if (await isPortInUse(port)) {
-    throw new Error(`Supabase callback port ${port} is already in use`);
+    return serverPort;
   }
 
   const brokerConfig: BrokerConfig = {
-    baseUrl: config.brokerBaseUrl,
+    baseUrl: _config.brokerBaseUrl,
   };
 
-  await deps.logger?.info("supabase callback server started", {
-    port,
-  });
-
-  server = Bun.serve({
-    port,
-    async fetch(req) {
-      const url = new URL(req.url);
-      if (url.pathname !== CALLBACK_PATH) {
-        return new Response("Not found", { status: 404 });
-      }
-
-      const state = url.searchParams.get("state");
-      await deps.logger?.debug("supabase auth callback received", {
-        has_state: Boolean(state),
-        has_code: Boolean(url.searchParams.get("code")),
-        has_error: Boolean(url.searchParams.get("error")),
-      });
-      if (!state) {
-        return new Response(htmlError("Missing required state parameter - potential CSRF attack"), {
-          status: 400,
-          headers: { "Content-Type": "text/html" },
-        });
-      }
-
-      const pending = pendingAuths.get(state);
-      if (!pending) {
-        return new Response(htmlError("Invalid or expired state parameter - potential CSRF attack"), {
-          status: 400,
-          headers: { "Content-Type": "text/html" },
-        });
-      }
-
-      const error = url.searchParams.get("error");
-      const errorDescription = url.searchParams.get("error_description");
-      if (error) {
-        clearTimeout(pending.timeout);
-        pendingAuths.delete(state);
-        await deps.logger?.error("supabase auth failed", {
-          reason: "provider_denied",
-        });
-        pending.reject(new Error(errorDescription || error));
-        return new Response(htmlError(errorDescription || error), {
-          headers: { "Content-Type": "text/html" },
-        });
-      }
-
-      const code = url.searchParams.get("code");
-      if (!code) {
-        clearTimeout(pending.timeout);
-        pendingAuths.delete(state);
-        await deps.logger?.error("supabase auth failed", {
-          reason: "missing_code",
-        });
-        pending.reject(new Error("Missing authorization code"));
-        return new Response(htmlError("Missing authorization code"), {
-          status: 400,
-          headers: { "Content-Type": "text/html" },
-        });
-      }
-
-      clearTimeout(pending.timeout);
-      pendingAuths.delete(state);
-
+  let selectedPort: number | undefined;
+  for (const port of candidatePorts) {
+    const portBusy = await isPortInUse(port);
+    await deps.logger?.debug("supabase callback port probe", {
+      port,
+      available: !portBusy,
+    });
+    if (!portBusy) {
       try {
-        const tokens = await exchangeCodeThroughBroker(
-          brokerConfig,
-          {
-            code,
-            redirect_uri: pending.redirectUri,
-            code_verifier: pending.codeVerifier,
+        server = Bun.serve({
+          port,
+          async fetch(req) {
+            const url = new URL(req.url);
+            if (url.pathname !== CALLBACK_PATH) {
+              return new Response("Not found", { status: 404 });
+            }
+
+            const state = url.searchParams.get("state");
+            await deps.logger?.debug("supabase auth callback received", {
+              has_state: Boolean(state),
+              has_code: Boolean(url.searchParams.get("code")),
+              has_error: Boolean(url.searchParams.get("error")),
+            });
+            if (!state) {
+              return new Response(htmlError("Missing required state parameter - potential CSRF attack"), {
+                status: 400,
+                headers: { "Content-Type": "text/html" },
+              });
+            }
+
+            const pending = pendingAuths.get(state);
+            if (!pending) {
+              return new Response(htmlError("Invalid or expired state parameter - potential CSRF attack"), {
+                status: 400,
+                headers: { "Content-Type": "text/html" },
+              });
+            }
+
+            const error = url.searchParams.get("error");
+            const errorDescription = url.searchParams.get("error_description");
+            if (error) {
+              clearTimeout(pending.timeout);
+              pendingAuths.delete(state);
+              await deps.logger?.error("supabase auth failed", {
+                reason: "provider_denied",
+              });
+              pending.reject(new Error(errorDescription || error));
+              await stopServerIfIdle(deps.logger, "provider_denied");
+              return new Response(htmlError(errorDescription || error), {
+                headers: { "Content-Type": "text/html" },
+              });
+            }
+
+            const code = url.searchParams.get("code");
+            if (!code) {
+              clearTimeout(pending.timeout);
+              pendingAuths.delete(state);
+              await deps.logger?.error("supabase auth failed", {
+                reason: "missing_code",
+              });
+              pending.reject(new Error("Missing authorization code"));
+              await stopServerIfIdle(deps.logger, "missing_code");
+              return new Response(htmlError("Missing authorization code"), {
+                status: 400,
+                headers: { "Content-Type": "text/html" },
+              });
+            }
+
+            clearTimeout(pending.timeout);
+            pendingAuths.delete(state);
+
+            try {
+              const tokens = await exchangeCodeThroughBroker(
+                brokerConfig,
+                {
+                  code,
+                  redirect_uri: pending.redirectUri,
+                  code_verifier: pending.codeVerifier,
+                },
+                deps.fetch,
+                deps.logger,
+              );
+
+              const expires = Date.now() + (tokens.expires_in || 3600) * 1000;
+              await writeSavedAuth(input, {
+                access: tokens.access_token,
+                refresh: tokens.refresh_token,
+                expires,
+              });
+
+              pending.resolve({ tokens, expires });
+
+              await deps.logger?.info("supabase auth completed", {
+                status: "success",
+              });
+
+              await stopServerIfIdle(deps.logger, "auth_completed");
+
+              return new Response(HTML_SUCCESS, {
+                headers: { "Content-Type": "text/html" },
+              });
+            } catch (cause) {
+              const errorMessage = cause instanceof BrokerClientError
+                ? `Authorization failed: ${cause.message}`
+                : "Authorization failed";
+
+              await deps.logger?.error("supabase auth failed", {
+                status: cause instanceof BrokerClientError ? cause.status : 400,
+                broker_error: cause instanceof BrokerClientError,
+              });
+
+              pending.reject(cause instanceof Error ? cause : new Error(String(cause)));
+              await stopServerIfIdle(deps.logger, "broker_exchange_failed");
+
+              return new Response(htmlError(errorMessage), {
+                status: cause instanceof BrokerClientError && cause.status >= 500 ? 502 : 400,
+                headers: { "Content-Type": "text/html" },
+              });
+            }
           },
-          deps.fetch,
-          deps.logger,
-        );
-
-        const expires = Date.now() + (tokens.expires_in || 3600) * 1000;
-        await writeSavedAuth(input, {
-          access: tokens.access_token,
-          refresh: tokens.refresh_token,
-          expires,
         });
-
-        pending.resolve({ tokens, expires });
-
-        await deps.logger?.info("supabase auth completed", {
-          status: "success",
-        });
-
-        return new Response(HTML_SUCCESS, {
-          headers: { "Content-Type": "text/html" },
-        });
-      } catch (cause) {
-        const errorMessage = cause instanceof BrokerClientError
-          ? `Authorization failed: ${cause.message}`
-          : "Authorization failed";
-
-        await deps.logger?.error("supabase auth failed", {
-          status: cause instanceof BrokerClientError ? cause.status : 400,
-          broker_error: cause instanceof BrokerClientError,
-        });
-
-        pending.reject(cause instanceof Error ? cause : new Error(String(cause)));
-
-        return new Response(htmlError(errorMessage), {
-          status: cause instanceof BrokerClientError && cause.status >= 500 ? 502 : 400,
-          headers: { "Content-Type": "text/html" },
+        selectedPort = port;
+        break;
+      } catch (error) {
+        await deps.logger?.warn("supabase callback server bind failed", {
+          port,
+          message: error instanceof Error ? error.message : String(error),
         });
       }
-    },
+    }
+  }
+
+  if (selectedPort === undefined) {
+    await deps.logger?.error("supabase callback port window exhausted", {
+      ports_tried: candidatePorts,
+    });
+    throw new Error(
+      `Supabase callback ports busy: ${candidatePorts.join(", ")}. Close other OpenCode sessions and retry.`,
+    );
+  }
+
+  await deps.logger?.info("supabase callback server started", {
+    port: selectedPort,
   });
 
-  serverPort = port;
+  serverPort = selectedPort;
+  return selectedPort;
+}
+
+async function stopServerIfIdle(logger?: SupabaseLogger, reason?: string) {
+  if (pendingAuths.size > 0 || !server) return;
+  const port = serverPort;
+  server.stop();
+  server = undefined;
+  serverPort = undefined;
+  await logger?.info("supabase callback server stopped", {
+    reason,
+    port,
+  });
 }
 
 function waitForCallback(
@@ -201,6 +254,7 @@ function waitForCallback(
       void deps.logger?.error("supabase auth callback timed out", {
         reason: "timeout",
       });
+      void stopServerIfIdle(deps.logger, "timeout");
       reject(new Error("OAuth callback timeout - authorization took too long"));
     }, CALLBACK_TIMEOUT_MS);
 
@@ -220,6 +274,7 @@ export function createSupabaseAuth(
   deps: AuthDeps = {},
 ) {
   const config = readSupabaseConfig(options);
+  const authCallbackPorts = normalizeCallbackPorts(deps.callbackPorts ?? CALLBACK_PORTS);
 
   return {
     provider: "supabase",
@@ -228,13 +283,13 @@ export function createSupabaseAuth(
         type: "oauth" as const,
         label: "Supabase",
         async authorize() {
-          await ensureServer(config.oauthPort, config, input, deps);
+          const port = await ensureServer(authCallbackPorts, config, input, deps);
           await deps.logger?.info("supabase auth started", {
-            port: config.oauthPort,
+            port,
           });
           const pkce = await generatePKCE();
           const state = generateState();
-          const redirectUri = callbackUrl(config.oauthPort);
+          const redirectUri = callbackUrl(port);
           const callbackPromise = waitForCallback(state, pkce.verifier, redirectUri, deps);
 
           return {

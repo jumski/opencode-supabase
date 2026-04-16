@@ -35,7 +35,7 @@ describe("shared config", () => {
 
     expect(config).toEqual({
       clientId: "plugin-client",
-      oauthPort: 1456,
+      oauthPort: DEFAULT_SUPABASE_OAUTH_PORT,
       authorizeUrl: DEFAULT_SUPABASE_OAUTH_AUTHORIZE_URL,
       brokerBaseUrl: "https://example.com/env-broker",
       apiBaseUrl: DEFAULT_SUPABASE_API_BASE_URL,
@@ -68,7 +68,7 @@ describe("shared config", () => {
 
     expect(config).toEqual({
       clientId: "env-client",
-      oauthPort: 4567,
+      oauthPort: DEFAULT_SUPABASE_OAUTH_PORT,
       authorizeUrl: "https://example.com/authorize",
       brokerBaseUrl: "https://example.com/broker",
       apiBaseUrl: "https://example.com/api",
@@ -98,22 +98,23 @@ describe("shared config", () => {
     expect(config.brokerBaseUrl).toBe("https://iaoxncwzemnfxcdwakzb.supabase.co/functions/v1/opencode-supabase-broker");
   });
 
-  test("uses the default oauth port and rejects invalid env ports", () => {
+  test("uses the fixed default oauth port regardless of overrides", () => {
     expect(
       readSupabaseConfig(
         {
           clientId: "plugin-client",
+          oauthPort: 9999,
         },
         {},
       ).oauthPort,
     ).toBe(DEFAULT_SUPABASE_OAUTH_PORT);
 
-    expect(() =>
+    expect(
       readSupabaseConfig(undefined, {
         OPENCODE_SUPABASE_OAUTH_CLIENT_ID: "env-client",
         OPENCODE_SUPABASE_OAUTH_PORT: "abc",
-      }),
-    ).toThrow("Invalid Supabase config: oauthPort must be a positive integer");
+      }).oauthPort,
+    ).toBe(DEFAULT_SUPABASE_OAUTH_PORT);
   });
 });
 

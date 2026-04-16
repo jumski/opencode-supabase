@@ -72,16 +72,19 @@ Export the required variables before launching OpenCode:
 ```bash
 export OPENCODE_SUPABASE_BROKER_URL=http://localhost:54321/functions/v1/opencode-supabase-broker
 export OPENCODE_SUPABASE_OAUTH_CLIENT_ID=<your_supabase_oauth_app_client_id>
-export OPENCODE_SUPABASE_OAUTH_PORT=14589
 ```
 
-The callback URL is:
+Plugin uses fixed callback window:
 
 ```text
 http://localhost:14589/auth/callback
+http://localhost:14590/auth/callback
+http://localhost:14591/auth/callback
 ```
 
-Your Supabase OAuth app must allow that redirect URI.
+Your Supabase OAuth app must allow all 3 redirect URIs above.
+
+Important: update both local/dev OAuth app config and deployed OAuth app config before testing fallback behavior.
 
 Then launch OpenCode and run:
 
@@ -131,12 +134,6 @@ Missing plugin client ID:
 export OPENCODE_SUPABASE_OAUTH_CLIENT_ID=<your_supabase_oauth_app_client_id>
 ```
 
-Missing plugin callback port:
-
-```bash
-export OPENCODE_SUPABASE_OAUTH_PORT=14589
-```
-
 Broker returns a generic `500`:
 
 - verify `supabase/functions/.env` contains valid values for `OPENCODE_SUPABASE_OAUTH_CLIENT_ID` and `OPENCODE_SUPABASE_OAUTH_CLIENT_SECRET`
@@ -144,3 +141,8 @@ Broker returns a generic `500`:
 Redirect rejected:
 
 - verify the OAuth app redirect URI, plugin callback URI, and broker allowlist all match
+
+All callback ports busy:
+
+- plugin retries `14589`, `14590`, then `14591`
+- if all 3 are busy, close other OpenCode sessions or stale local processes and retry

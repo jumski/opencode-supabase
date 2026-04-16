@@ -204,3 +204,60 @@ test("supabase dialog logs auth milestones without leaking oauth query values", 
   expect(serialized).not.toContain("code=secret");
   expect(cleared).toBe(1);
 });
+
+test("supabase dialog shows explicit callback port exhaustion toast", async () => {
+  const toasts: Array<{ variant?: string; message: string }> = [];
+  let cleared = 0;
+
+  const api = {
+    ui: {
+      DialogAlert: (input: unknown) => input,
+      DialogConfirm: (input: unknown) => input,
+      toast: (input: { variant?: string; message: string }) => {
+        toasts.push(input);
+      },
+      dialog: {
+        clear: () => {
+          cleared += 1;
+        },
+      },
+    },
+    client: {
+      app: {
+        log: (_input: unknown) => Promise.resolve(true),
+      },
+      provider: {
+        oauth: {
+          authorize: () => Promise.resolve({
+            error: {
+              message: "Supabase callback ports busy: 14589, 14590, 14591. Close other OpenCode sessions and retry.",
+            },
+          }),
+          callback: () => Promise.resolve({ data: true }),
+        },
+      },
+    },
+  } as unknown as Parameters<typeof SupabaseDialog>[0]["api"];
+
+  const logger = {
+    debug: () => Promise.resolve(),
+    info: () => Promise.resolve(),
+    warn: () => Promise.resolve(),
+    error: () => Promise.resolve(),
+  };
+
+  const dialog = SupabaseDialog({ api, logger, onClose: () => api.ui.dialog.clear() }) as {
+    onConfirm?: () => Promise<void>;
+  };
+
+  await dialog.onConfirm?.();
+
+  expect(toasts).toEqual([
+    {
+      variant: "error",
+      message:
+        "Supabase authorization failed: Supabase callback ports busy: 14589, 14590, 14591. Close other OpenCode sessions and retry.",
+    },
+  ]);
+  expect(cleared).toBe(1);
+});

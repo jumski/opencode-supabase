@@ -115,6 +115,86 @@ describe("supabase broker exchange", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  test("accepts fallback localhost callback ports in same plugin path", async () => {
+    const fetchMock = mock(async (input: string | URL | Request, init?: RequestInit) => {
+      expect(String(input)).toBe("https://api.supabase.com/v1/oauth/token");
+
+      const body = new URLSearchParams(String(init?.body));
+      expect(body.get("redirect_uri")).toBe("http://localhost:14590/auth/callback");
+
+      return Response.json(
+        {
+          access_token: "access-14590",
+          refresh_token: "refresh-14590",
+          expires_in: 3600,
+          token_type: "bearer",
+        } satisfies TokenResponse,
+        { status: 200 },
+      );
+    });
+
+    const response = await handleExchangeRequest(
+      new Request("http://localhost:54321/exchange", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          code: "code-14590",
+          code_verifier: "verifier-14590",
+          redirect_uri: "http://localhost:14590/auth/callback",
+        }),
+      }),
+      baseConfig,
+      fetchMock,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      access_token: "access-14590",
+      refresh_token: "refresh-14590",
+      expires_in: 3600,
+      token_type: "bearer",
+    });
+  });
+
+  test("accepts third fixed localhost callback port in plugin path", async () => {
+    const fetchMock = mock(async (_input: string | URL | Request, init?: RequestInit) => {
+      const body = new URLSearchParams(String(init?.body));
+      expect(body.get("redirect_uri")).toBe("http://localhost:14591/auth/callback");
+
+      return Response.json(
+        {
+          access_token: "access-14591",
+          refresh_token: "refresh-14591",
+          expires_in: 3600,
+          token_type: "bearer",
+        } satisfies TokenResponse,
+        { status: 200 },
+      );
+    });
+
+    const response = await handleExchangeRequest(
+      new Request("http://localhost:54321/exchange", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          code: "code-14591",
+          code_verifier: "verifier-14591",
+          redirect_uri: "http://localhost:14591/auth/callback",
+        }),
+      }),
+      baseConfig,
+      fetchMock,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      access_token: "access-14591",
+      refresh_token: "refresh-14591",
+      expires_in: 3600,
+      token_type: "bearer",
+    });
+  });
+
   test("routes function-prefixed exchange paths used by Supabase local serve", async () => {
     const fetchMock = mock(async () => {
       return Response.json(
