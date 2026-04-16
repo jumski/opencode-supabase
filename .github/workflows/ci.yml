@@ -43,25 +43,27 @@ jobs:
 
   changeset-check:
     runs-on: ubuntu-latest
+    env:
+      SHOULD_RUN_CHANGESET_CHECK: ${{ github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'no-changeset') && !startsWith(github.head_ref, 'changeset-release/') }}
     steps:
       - name: Checkout
-        if: github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'no-changeset') && !startsWith(github.head_ref, 'changeset-release/')
+        if: env.SHOULD_RUN_CHANGESET_CHECK == 'true'
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: Setup Bun
-        if: github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'no-changeset') && !startsWith(github.head_ref, 'changeset-release/')
+        if: env.SHOULD_RUN_CHANGESET_CHECK == 'true'
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.3.11
 
       - name: Install dependencies
-        if: github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'no-changeset') && !startsWith(github.head_ref, 'changeset-release/')
+        if: env.SHOULD_RUN_CHANGESET_CHECK == 'true'
         run: bun install --frozen-lockfile
 
       - name: Check for changeset
-        if: github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'no-changeset') && !startsWith(github.head_ref, 'changeset-release/')
+        if: env.SHOULD_RUN_CHANGESET_CHECK == 'true'
         run: bunx changeset status --since=origin/main
 
   plugin-smoke:
