@@ -11,6 +11,7 @@ on:
   push:
     branches:
       - main
+      - changeset-release/**
   workflow_dispatch:
 
 jobs:
@@ -42,22 +43,28 @@ jobs:
 
   changeset-check:
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'no-changeset') && !startsWith(github.head_ref, 'changeset-release/')
+    env:
+      # Keep the required job green on release/no-changeset PRs while only running the real check for normal PRs.
+      SHOULD_RUN_CHANGESET_CHECK: ${{ github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'no-changeset') && !startsWith(github.head_ref, 'changeset-release/') }}
     steps:
       - name: Checkout
+        if: env.SHOULD_RUN_CHANGESET_CHECK == 'true'
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: Setup Bun
+        if: env.SHOULD_RUN_CHANGESET_CHECK == 'true'
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.3.11
 
       - name: Install dependencies
+        if: env.SHOULD_RUN_CHANGESET_CHECK == 'true'
         run: bun install --frozen-lockfile
 
       - name: Check for changeset
+        if: env.SHOULD_RUN_CHANGESET_CHECK == 'true'
         run: bunx changeset status --since=origin/main
 
   plugin-smoke:
