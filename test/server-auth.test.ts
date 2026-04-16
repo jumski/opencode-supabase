@@ -9,6 +9,7 @@ import { createSupabaseLogger } from "../src/shared/log.ts";
 import type { FetchLike } from "../src/shared/types.ts";
 
 const cleanupPaths: string[] = [];
+const occupiedPorts: Array<ReturnType<typeof Bun.serve>> = [];
 const originalBrokerUrl = process.env.OPENCODE_SUPABASE_BROKER_URL;
 
 async function createInput() {
@@ -32,8 +33,22 @@ function requireSearchParam(url: URL, key: string) {
   return value;
 }
 
+function occupyPort(port: number) {
+  const server = Bun.serve({
+    port,
+    fetch() {
+      return new Response("busy");
+    },
+  });
+  occupiedPorts.push(server);
+  return server;
+}
+
 afterEach(async () => {
   await stopSupabaseAuthServer();
+  for (const server of occupiedPorts.splice(0)) {
+    server.stop();
+  }
   await Promise.all(cleanupPaths.splice(0).map((path) => rm(path, { force: true, recursive: true })));
   if (originalBrokerUrl === undefined) {
     process.env.OPENCODE_SUPABASE_BROKER_URL = undefined;
@@ -65,6 +80,7 @@ describe("server auth hook", () => {
           ),
         ) as never,
         logger: createSupabaseLogger({ write }),
+        callbackPorts: [17658, 17659, 17660],
       },
     );
 
@@ -142,6 +158,7 @@ describe("server auth hook", () => {
       },
       {
         logger: createSupabaseLogger({ write }),
+        callbackPorts: [17659, 17660, 17661],
       },
     );
 
@@ -178,6 +195,7 @@ describe("server auth hook", () => {
           queueMicrotask(() => callback());
           return timer;
         }) as typeof setTimeout,
+        callbackPorts: [17660, 17661, 17662],
       },
     );
 
@@ -186,6 +204,92 @@ describe("server auth hook", () => {
 
     const logEntries = write.mock.calls.map((call) => JSON.stringify(((call as unknown) as [unknown])[0]));
     expect(logEntries.some((entry) => entry.includes("supabase auth callback timed out"))).toBe(true);
+    expect(logEntries.some((entry) => entry.includes("supabase callback server stopped"))).toBe(true);
+  });
+
+  test("falls back to next callback port when base port is busy", async () => {
+    const input = await createInput();
+    process.env.OPENCODE_SUPABASE_BROKER_URL = "https://example.com/broker";
+    occupyPort(17670);
+    const write = mock(async () => true);
+    const fetchMock = mock(async (url: string, init?: RequestInit) => {
+      expect(url).toBe("https://example.com/broker/exchange");
+      const body = JSON.parse(String(init?.body));
+      expect(body.redirect_uri).toBe("http://localhost:17671/auth/callback");
+
+      return new Response(
+        JSON.stringify({
+          access_token: "access-123",
+          refresh_token: "refresh-123",
+          expires_in: 1800,
+          token_type: "bearer",
+        }),
+      );
+    });
+
+    const auth = createSupabaseAuth(
+      input as never,
+      {
+        clientId: "plugin-client",
+        oauthPort: 17670,
+      },
+      {
+        fetch: fetchMock as unknown as FetchLike,
+        logger: createSupabaseLogger({ write }),
+        callbackPorts: [17670, 17671, 17672],
+      },
+    );
+
+    const result = await firstAuthMethod(auth).authorize();
+    const authUrl = new URL(result.url);
+    const redirectUri = new URL(requireSearchParam(authUrl, "redirect_uri"));
+    const state = requireSearchParam(authUrl, "state");
+
+    expect(redirectUri.toString()).toBe("http://localhost:17671/auth/callback");
+
+    const pending = result.callback();
+    const response = await fetch(`${redirectUri.toString()}?code=code-123&state=${state}`);
+
+    expect(response.status).toBe(200);
+    await expect(pending).resolves.toMatchObject({
+      type: "success",
+      access: "access-123",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    const logEntries = write.mock.calls.map((call) => JSON.stringify(((call as unknown) as [unknown])[0]));
+    expect(logEntries.some((entry) => entry.includes("supabase callback port probe") && entry.includes('"port":17670'))).toBe(true);
+    expect(logEntries.some((entry) => entry.includes("supabase callback port probe") && entry.includes('"port":17671'))).toBe(true);
+    expect(logEntries.some((entry) => entry.includes("supabase auth started") && entry.includes('"port":17671'))).toBe(true);
+    expect(logEntries.some((entry) => entry.includes("supabase callback server stopped"))).toBe(true);
+  });
+
+  test("fails clearly when callback port window is exhausted", async () => {
+    const input = await createInput();
+    process.env.OPENCODE_SUPABASE_BROKER_URL = "https://example.com/broker";
+    occupyPort(17680);
+    occupyPort(17681);
+    occupyPort(17682);
+    const write = mock(async () => true);
+
+    const auth = createSupabaseAuth(
+      input as never,
+      {
+        clientId: "plugin-client",
+        oauthPort: 17680,
+      },
+      {
+        logger: createSupabaseLogger({ write }),
+        callbackPorts: [17680, 17681, 17682],
+      },
+    );
+
+    await expect(firstAuthMethod(auth).authorize()).rejects.toThrow(
+      "Supabase callback ports busy: 17680, 17681, 17682. Close other OpenCode sessions and retry.",
+    );
+
+    const logEntries = write.mock.calls.map((call) => JSON.stringify(((call as unknown) as [unknown])[0]));
+    expect(logEntries.some((entry) => entry.includes("supabase callback port window exhausted"))).toBe(true);
   });
 
   test("builds an auto oauth authorize result using the plugin callback server", async () => {
@@ -208,6 +312,7 @@ describe("server auth hook", () => {
             }),
           ),
         ) as never,
+        callbackPorts: [17654, 17655, 17656],
       },
     );
 
@@ -223,6 +328,41 @@ describe("server auth hook", () => {
     expect(url.searchParams.get("state")).toBeTruthy();
     expect(url.searchParams.get("redirect_uri")).toBe("http://localhost:17654/auth/callback");
     expect(typeof result?.callback).toBe("function");
+  });
+
+  test("uses fixed public callback window even when oauthPort config differs", async () => {
+    const input = await createInput();
+    process.env.OPENCODE_SUPABASE_BROKER_URL = "https://example.com/broker";
+    const auth = createSupabaseAuth(
+      input as never,
+      {
+        clientId: "plugin-client",
+        oauthPort: 19999,
+      },
+      {
+        fetch: mock(async () =>
+          new Response(
+            JSON.stringify({
+              access_token: "a",
+              refresh_token: "r",
+              expires_in: 3600,
+              token_type: "bearer",
+            }),
+          ),
+        ) as never,
+      },
+    );
+
+    const result = await firstAuthMethod(auth).authorize();
+    void result.callback().catch(() => undefined);
+    const redirectUri = requireSearchParam(new URL(result.url), "redirect_uri");
+
+    expect([
+      "http://localhost:14589/auth/callback",
+      "http://localhost:14590/auth/callback",
+      "http://localhost:14591/auth/callback",
+    ]).toContain(redirectUri);
+    expect(redirectUri).not.toContain(":19999/");
   });
 
   test("rejects callback requests with missing state", async () => {
@@ -296,7 +436,7 @@ describe("server auth hook", () => {
         clientId: "plugin-client",
         oauthPort: 17656,
       },
-      { fetch: fetchMock as unknown as FetchLike },
+      { fetch: fetchMock as unknown as FetchLike, callbackPorts: [17656, 17657, 17658] },
     );
 
     const result = await firstAuthMethod(auth).authorize();
@@ -328,6 +468,50 @@ describe("server auth hook", () => {
     });
   });
 
+  test("stops callback listener after provider denial when no auth remains", async () => {
+    const input = await createInput();
+    process.env.OPENCODE_SUPABASE_BROKER_URL = "https://example.com/broker";
+    const write = mock(async () => true);
+    const auth = createSupabaseAuth(
+      input as never,
+      {
+        clientId: "plugin-client",
+        oauthPort: 17683,
+      },
+      {
+        logger: createSupabaseLogger({ write }),
+        callbackPorts: [17683, 17684, 17685],
+      },
+    );
+
+    const result = await firstAuthMethod(auth).authorize();
+    const redirectUri = new URL(requireSearchParam(new URL(result.url), "redirect_uri"));
+    const state = requireSearchParam(new URL(result.url), "state");
+
+    const pending = result.callback();
+    pending.catch(() => undefined);
+    await fetch(`${redirectUri.toString()}?error=access_denied&error_description=User%20denied&state=${state}`);
+    await expect(pending).rejects.toThrow("User denied");
+
+    const nextAuth = createSupabaseAuth(
+      input as never,
+      {
+        clientId: "plugin-client",
+        oauthPort: 17683,
+      },
+      {
+        logger: createSupabaseLogger({ write }),
+        callbackPorts: [17683, 17684, 17685],
+      },
+    );
+    const nextResult = await firstAuthMethod(nextAuth).authorize();
+    void nextResult.callback().catch(() => undefined);
+    expect(nextResult).toBeTruthy();
+
+    const logEntries = write.mock.calls.map((call) => JSON.stringify(((call as unknown) as [unknown])[0]));
+    expect(logEntries.some((entry) => entry.includes("supabase callback server stopped"))).toBe(true);
+  });
+
   test("persists oauth auth under the session directory when host worktree resolves to root", async () => {
     const input = await createInput();
     process.env.OPENCODE_SUPABASE_BROKER_URL = "https://example.com/broker";
@@ -348,7 +532,7 @@ describe("server auth hook", () => {
         clientId: "plugin-client",
         oauthPort: 17661,
       },
-      { fetch: fetchMock as unknown as FetchLike },
+      { fetch: fetchMock as unknown as FetchLike, callbackPorts: [17661, 17662, 17663] },
     );
 
     const result = await firstAuthMethod(auth).authorize();
@@ -399,7 +583,7 @@ describe("server auth hook", () => {
         clientId: "plugin-client",
         oauthPort: 17662,
       },
-      { fetch: fetchMock as unknown as FetchLike },
+      { fetch: fetchMock as unknown as FetchLike, callbackPorts: [17662, 17663, 17664] },
     );
 
     const result = await firstAuthMethod(auth).authorize();

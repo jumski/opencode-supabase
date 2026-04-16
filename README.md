@@ -20,6 +20,18 @@ Launch `opencode` in your project, then run:
 
 Connect your account and ask your agent about Supabase capabilities.
 
+## OAuth Callback Contract
+
+Plugin uses fixed localhost callback window for browser auth:
+
+- `http://localhost:14589/auth/callback`
+- `http://localhost:14590/auth/callback`
+- `http://localhost:14591/auth/callback`
+
+Your Supabase OAuth app must allow all 3 redirect URIs.
+
+Maintainer note: deployed OAuth app config must stay in sync with this fixed callback set. If callback ports change in code later, update OAuth app setup too.
+
 ## Debug Logging
 
 If you hit auth or tool errors and need logs for an issue, collect the newest OpenCode session log from its default log directory:

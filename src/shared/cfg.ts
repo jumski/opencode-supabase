@@ -18,26 +18,6 @@ function readEnvString(value: string | undefined): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
-function readPortOption(options: PluginOptions | undefined, key: string) {
-  const value = options?.[key];
-  if (typeof value === "number") return value;
-  if (typeof value === "string" && value.trim()) return value.trim();
-  return undefined;
-}
-
-function requirePort(value: number | string | undefined) {
-  if (value === undefined) {
-    throw new Error("Missing required Supabase config: oauthPort");
-  }
-
-  const parsed = typeof value === "number" ? value : Number.parseInt(value, 10);
-  if (!Number.isInteger(parsed) || parsed <= 0) {
-    throw new Error("Invalid Supabase config: oauthPort must be a positive integer");
-  }
-
-  return parsed;
-}
-
 export function readSupabaseConfig(
   options: PluginOptions | undefined,
   env: SupabaseEnv = process.env,
@@ -46,11 +26,6 @@ export function readSupabaseConfig(
     readStringOption(options, "clientId") ??
     readEnvString(env.OPENCODE_SUPABASE_OAUTH_CLIENT_ID) ??
     DEFAULT_SUPABASE_OAUTH_CLIENT_ID;
-  const oauthPort = requirePort(
-    readPortOption(options, "oauthPort") ??
-    env.OPENCODE_SUPABASE_OAUTH_PORT ??
-    DEFAULT_SUPABASE_OAUTH_PORT,
-  );
   const brokerBaseUrl =
     readStringOption(options, "brokerBaseUrl") ??
     readEnvString(env.OPENCODE_SUPABASE_BROKER_URL) ??
@@ -58,7 +33,7 @@ export function readSupabaseConfig(
 
   return {
     clientId,
-    oauthPort,
+    oauthPort: DEFAULT_SUPABASE_OAUTH_PORT,
     authorizeUrl:
       readStringOption(options, "authorizeUrl") ??
       env.SUPABASE_OAUTH_AUTHORIZE_URL ??
