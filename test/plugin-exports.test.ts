@@ -230,7 +230,14 @@ test("supabase dialog shows explicit callback port exhaustion toast", async () =
         oauth: {
           authorize: () => Promise.resolve({
             error: {
-              message: "Supabase callback ports busy: 14589, 14590, 14591. Close other OpenCode sessions and retry.",
+              data: {
+                name: "UnknownError",
+                data: {
+                  message: "Supabase callback ports busy: 14589, 14590, 14591. Close other OpenCode sessions and retry.",
+                },
+              },
+              errors: [],
+              success: false,
             },
           }),
           callback: () => Promise.resolve({ data: true }),
@@ -256,7 +263,78 @@ test("supabase dialog shows explicit callback port exhaustion toast", async () =
     {
       variant: "error",
       message:
-        "Supabase authorization failed: Supabase callback ports busy: 14589, 14590, 14591. Close other OpenCode sessions and retry.",
+        "Supabase callback ports busy: 14589, 14590, 14591. Close other OpenCode sessions and retry.",
+    },
+  ]);
+  expect(cleared).toBe(1);
+});
+
+test("supabase dialog shows nested callback error from sdk payload", async () => {
+  const toasts: Array<{ variant?: string; message: string }> = [];
+  let cleared = 0;
+
+  const api = {
+    ui: {
+      DialogAlert: (input: unknown) => input,
+      DialogConfirm: (input: unknown) => input,
+      toast: (input: { variant?: string; message: string }) => {
+        toasts.push(input);
+      },
+      dialog: {
+        clear: () => {
+          cleared += 1;
+        },
+      },
+    },
+    client: {
+      app: {
+        log: (_input: unknown) => Promise.resolve(true),
+      },
+      provider: {
+        oauth: {
+          authorize: () =>
+            Promise.resolve({
+              data: {
+                url: "https://example.com/oauth",
+                instructions: "Open browser",
+                method: "auto",
+              },
+            }),
+          callback: () =>
+            Promise.resolve({
+              error: {
+                data: {
+                  name: "UnknownError",
+                  data: {
+                    message: "broker returned an invalid response",
+                  },
+                },
+                errors: [],
+                success: false,
+              },
+            }),
+        },
+      },
+    },
+  } as unknown as Parameters<typeof SupabaseDialog>[0]["api"];
+
+  const logger = {
+    debug: () => Promise.resolve(),
+    info: () => Promise.resolve(),
+    warn: () => Promise.resolve(),
+    error: () => Promise.resolve(),
+  };
+
+  const dialog = SupabaseDialog({ api, logger, onClose: () => api.ui.dialog.clear() }) as {
+    onConfirm?: () => Promise<void>;
+  };
+
+  await dialog.onConfirm?.();
+
+  expect(toasts).toEqual([
+    {
+      variant: "error",
+      message: "broker returned an invalid response",
     },
   ]);
   expect(cleared).toBe(1);
