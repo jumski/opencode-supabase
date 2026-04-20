@@ -189,7 +189,7 @@ async function ensureServer(
                 broker_error: cause instanceof BrokerClientError,
               });
 
-              pending.reject(new Error(message));
+              pending.reject(cause instanceof Error ? cause : new Error(message));
               await stopServerIfIdle(deps.logger, "broker_exchange_failed");
 
               return new Response(htmlError(message), {

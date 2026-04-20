@@ -137,8 +137,12 @@ describe("server auth hook", () => {
 
     const pending = result.callback();
     pending.catch(() => undefined);
-    await fetch(`${redirectUri.toString()}?code=code-123&state=${state}`);
+    const response = await fetch(`${redirectUri.toString()}?code=code-123&state=${state}`);
     await expect(pending).rejects.toThrow("redirect_uri not allowed");
+
+    expect(response.status).toBe(400);
+    const html = await response.text();
+    expect(html).toContain("redirect_uri not allowed");
 
     const logEntries = write.mock.calls.map((call) => JSON.stringify(((call as unknown) as [unknown])[0]));
 
