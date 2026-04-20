@@ -1,6 +1,7 @@
 import type { TuiPluginApi } from "@opencode-ai/plugin/tui";
 import { createSignal } from "solid-js";
 
+import { formatAuthError } from "../shared/auth-errors.ts";
 import type { SupabaseLogger } from "../shared/log.ts";
 
 type SupabaseDialogProps = {
@@ -44,9 +45,7 @@ export function SupabaseDialog(props: SupabaseDialogProps) {
 
       // Handle the response shape from the plugin API
       if (authResponse.error) {
-        throw new Error(
-          authResponse.error.message || "Failed to start OAuth authorization",
-        );
+        throw new Error(formatAuthError("start", authResponse.error));
       }
 
       const authData = authResponse.data;
@@ -86,9 +85,7 @@ export function SupabaseDialog(props: SupabaseDialogProps) {
       })) as unknown as ApiResponse<boolean>;
 
       if (callbackResponse.error) {
-        throw new Error(
-          callbackResponse.error.message || "OAuth callback failed",
-        );
+        throw new Error(formatAuthError("callback", callbackResponse.error));
       }
 
       const callbackSucceeded = callbackResponse.data === true;
@@ -108,15 +105,14 @@ export function SupabaseDialog(props: SupabaseDialogProps) {
         throw new Error("OAuth authorization was denied");
       }
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Authorization failed";
+      const message = formatAuthError("unknown", error);
       await props.logger.error("supabase auth failed", {
         message,
       });
       setState({ type: "error", message });
       props.api.ui.toast({
         variant: "error",
-        message: `Supabase authorization failed: ${message}`,
+        message,
       });
       props.onClose();
     }

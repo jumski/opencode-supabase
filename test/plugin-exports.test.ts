@@ -256,7 +256,7 @@ test("supabase dialog shows explicit callback port exhaustion toast", async () =
     {
       variant: "error",
       message:
-        "Supabase authorization failed: Supabase callback ports busy: 14589, 14590, 14591. Close other OpenCode sessions and retry.",
+        "Supabase callback ports busy: 14589, 14590, 14591. Close other OpenCode sessions and retry.",
     },
   ]);
   expect(cleared).toBe(1);
