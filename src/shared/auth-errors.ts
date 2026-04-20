@@ -7,13 +7,38 @@ const FALLBACKS: Record<AuthErrorStage, string> = {
   unknown: "Authorization failed",
 };
 
+function getObjectMessage(value: unknown): string | undefined {
+  if (!value || typeof value !== "object") return undefined;
+
+  if ("message" in value) {
+    const message = (value as { message: unknown }).message;
+    if (typeof message === "string") return message || undefined;
+  }
+
+  return undefined;
+}
+
 function extractErrorMessage(error: unknown): string | undefined {
   if (error instanceof Error) return error.message || undefined;
   if (typeof error === "string") return error || undefined;
-  if (error && typeof error === "object" && "message" in error) {
-    const msg = (error as { message: unknown }).message;
-    if (typeof msg === "string") return msg || undefined;
+  const message = getObjectMessage(error);
+  if (message) return message;
+
+  if (error && typeof error === "object") {
+    const dataMessage = getObjectMessage((error as { data?: unknown }).data);
+    if (dataMessage) return dataMessage;
+
+    const nestedData = (error as { data?: { data?: unknown } }).data?.data;
+    const nestedDataMessage = getObjectMessage(nestedData);
+    if (nestedDataMessage) return nestedDataMessage;
+
+    const firstError = Array.isArray((error as { errors?: unknown }).errors)
+      ? (error as { errors: unknown[] }).errors[0]
+      : undefined;
+    const firstErrorMessage = getObjectMessage(firstError);
+    if (firstErrorMessage) return firstErrorMessage;
   }
+
   return undefined;
 }
 

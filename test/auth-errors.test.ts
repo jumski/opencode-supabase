@@ -17,12 +17,57 @@ describe("formatAuthError", () => {
       expect(formatAuthError("start", { message: "API error detail" })).toBe("API error detail");
     });
 
+    test("extracts message from NamedError-like .data.message", () => {
+      expect(formatAuthError("callback", { name: "UnknownError", data: { message: "broker rejected code" } })).toBe(
+        "broker rejected code",
+      );
+    });
+
+    test("extracts message from SDK-style .data.data.message", () => {
+      expect(
+        formatAuthError("callback", {
+          data: {
+            name: "UnknownError",
+            data: {
+              message: "redirect_uri not allowed",
+            },
+          },
+          errors: [],
+          success: false,
+        }),
+      ).toBe("redirect_uri not allowed");
+    });
+
+    test("extracts message from first .errors entry", () => {
+      expect(
+        formatAuthError("start", {
+          data: null,
+          errors: [{ message: "provider auth callback failed" }],
+          success: false,
+        }),
+      ).toBe("provider auth callback failed");
+    });
+
     test("returns string directly when error is a string", () => {
       expect(formatAuthError("unknown", "plain string error")).toBe("plain string error");
     });
 
     test("ignores non-string .message property", () => {
       expect(formatAuthError("unknown", { message: 42 })).toBe("Authorization failed");
+    });
+
+    test("ignores non-string nested messages", () => {
+      expect(
+        formatAuthError("callback", {
+          data: {
+            data: {
+              message: 42,
+            },
+          },
+          errors: [{ message: false }],
+          success: false,
+        }),
+      ).toBe("OAuth callback failed");
     });
   });
 

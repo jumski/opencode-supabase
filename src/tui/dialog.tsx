@@ -18,8 +18,7 @@ type OAuthState =
   | { type: "error"; message: string };
 
 // API response types
-type ApiError = { message?: string; [key: string]: unknown };
-type ApiResponse<T> = { data?: T; error?: ApiError };
+type ApiResponse<T> = { data?: T; error?: unknown };
 
 type AuthData = {
   url: string;
