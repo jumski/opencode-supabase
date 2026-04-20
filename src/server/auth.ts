@@ -1,6 +1,7 @@
 import { createConnection } from "node:net";
 import type { PluginInput, PluginOptions } from "@opencode-ai/plugin";
 
+import { formatAuthError } from "../shared/auth-errors.ts";
 import {
   BrokerClientError,
   type BrokerConfig,
@@ -181,19 +182,17 @@ async function ensureServer(
                 headers: { "Content-Type": "text/html" },
               });
             } catch (cause) {
-              const errorMessage = cause instanceof BrokerClientError
-                ? `Authorization failed: ${cause.message}`
-                : "Authorization failed";
+              const message = formatAuthError("exchange", cause);
 
               await deps.logger?.error("supabase auth failed", {
                 status: cause instanceof BrokerClientError ? cause.status : 400,
                 broker_error: cause instanceof BrokerClientError,
               });
 
-              pending.reject(cause instanceof Error ? cause : new Error(String(cause)));
+              pending.reject(new Error(message));
               await stopServerIfIdle(deps.logger, "broker_exchange_failed");
 
-              return new Response(htmlError(errorMessage), {
+              return new Response(htmlError(message), {
                 status: cause instanceof BrokerClientError && cause.status >= 500 ? 502 : 400,
                 headers: { "Content-Type": "text/html" },
               });
