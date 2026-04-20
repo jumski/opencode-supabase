@@ -256,6 +256,23 @@ export function createSupabaseTools(
         );
       },
     }),
+    supabase_list_regions: tool({
+      description: "List all available database regions for creating a Supabase project in a specific organization.",
+      args: {
+        organization_slug: tool.schema.string().describe("Organization slug to list regions for"),
+      },
+      async execute(args, _context: SupabaseToolContext) {
+        return executeSupabaseGet(
+          input,
+          options,
+          deps,
+          "supabase_list_regions",
+          _context,
+          `/projects/available-regions?organization_slug=${encodeURIComponent(args.organization_slug)}`,
+          "list regions",
+        );
+      },
+    }),
     supabase_get_project_api_keys: tool({
       description: "Get the API keys for a Supabase project.",
       args: {

@@ -1101,6 +1101,75 @@ describe("server tools auth helper", () => {
     ).rejects.toThrow("Failed to create project: 400 bad request");
   });
 
+  test("fetches available regions for an organization", async () => {
+    const { input } = await createInput();
+    process.env.OPENCODE_SUPABASE_BROKER_URL = "https://example.com/broker";
+    await writeSavedAuth(input, {
+      access: "saved-access",
+      refresh: "saved-refresh",
+      expires: Date.now() + 60_000,
+    });
+
+    const fetchMock: FetchLike = mock(async (request, init) => {
+      const url = String(request);
+      expect(url).toBe("https://api.supabase.com/v1/projects/available-regions?organization_slug=my-org");
+      expect(init?.headers).toMatchObject({
+        Authorization: "Bearer saved-access",
+        Accept: "application/json",
+      });
+
+      return new Response(JSON.stringify({
+        recommendations: { smartGroup: [], specific: [] },
+        all: {
+          smartGroup: [{ name: "Americas", code: "americas" }],
+          specific: [{ name: "US East (North Virginia)", code: "us-east-1", type: "specific", provider: "AWS" }],
+        },
+      }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+
+    const tools = createSupabaseTools(
+      input,
+      {
+        clientId: "plugin-client",
+        oauthPort: 17690,
+      },
+      { fetch: fetchMock },
+    );
+
+    const result = await tools.supabase_list_regions.execute({ organization_slug: "my-org" }, createContext(input));
+
+    expect(result).toContain("us-east-1");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  test("formats regions API failures clearly", async () => {
+    const { input } = await createInput();
+    process.env.OPENCODE_SUPABASE_BROKER_URL = "https://example.com/broker";
+    await writeSavedAuth(input, {
+      access: "saved-access",
+      refresh: "saved-refresh",
+      expires: Date.now() + 60_000,
+    });
+
+    const fetchMock: FetchLike = mock(async () => new Response("nope", { status: 403 }));
+
+    const tools = createSupabaseTools(
+      input,
+      {
+        clientId: "plugin-client",
+        oauthPort: 17691,
+      },
+      { fetch: fetchMock },
+    );
+
+    await expect(
+      tools.supabase_list_regions.execute({ organization_slug: "my-org" }, createContext(input)),
+    ).rejects.toThrow("Failed to list regions: 403 nope");
+  });
+
   test("supabase_login returns TUI guidance", async () => {
     const { input } = await createInput();
 
