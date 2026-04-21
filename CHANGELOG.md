@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.0.8
+
+### Patch Changes
+
+- 958036d: Replace fleeting success toasts with a persistent post-auth dialog that lists concrete example prompts (`list my Supabase projects`, `list my Supabase organizations`, `for organization <name>, list available regions`). The waiting dialog now uses centered built-in `DialogAlert` instead of a custom off-center shell. Browser success page stays minimal with a small prompt snippet. Dismissing the waiting dialog suppresses the success dialog to avoid surprise popups. Also fixes error dialog retry to start a fresh OAuth flow instead of reopening stale browser tabs.
+
+  Refs: #22, #27
+
+- 6271160: Fix inconsistent auth error messages between toast/dialog and browser/TUI by extracting a shared `formatAuthError` helper that unwraps nested SDK error payloads.
+- c8e538b: Add `supabase_list_regions` tool — calls `GET /v1/projects/available-regions?organization_slug=<slug>` so the LLM can discover valid region codes before creating projects.
+
 ## 0.0.7
 
 ### Patch Changes
