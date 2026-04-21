@@ -68,6 +68,18 @@ const SHARED_STYLES = `
   .icon-error { background: #ef4444; color: #fff; }
   h1 { font-size: 20px; font-weight: 600; letter-spacing: -0.01em; text-align: center; }
   p { font-size: 16px; color: #EDEDED; text-align: center; line-height: 1.5; max-width: 280px; }
+  .prompt-label { font-size: 13px; color: #8b8b8b; text-align: center; }
+  .prompt-box {
+    width: 100%;
+    background: #1b1b1b;
+    border: 1px solid #2e2e2e;
+    border-radius: 10px;
+    padding: 12px 14px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 13px;
+    color: #EDEDED;
+    text-align: center;
+  }
   .footer { margin-top: 8px; line-height: 1.5; text-align: center; color: #666; font-size: 12px; }
   .footer a { color: #8b8b8b; text-decoration: underline; text-underline-offset: 2px; }
   .footer a:hover { color: #EDEDED; }
@@ -89,6 +101,8 @@ export const HTML_SUCCESS = `<!doctype html>
         <h1>Authorization Successful</h1>
       </div>
       <p>You can <strong>close this window</strong> and return to OpenCode.</p>
+      <div class="prompt-label">Try this next:</div>
+      <div class="prompt-box">list my Supabase projects</div>
       <div class="footer">Having troubles or found a bug?<br><a href="${REPO_URL}" target="_blank" rel="noopener">Report it on GitHub</a></div>
     </div>
     <script>setTimeout(function(){window.close()},2000)</script>

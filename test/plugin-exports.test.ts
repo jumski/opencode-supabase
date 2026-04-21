@@ -3,7 +3,7 @@ import { expect, test } from "bun:test";
 import { HTML_SUCCESS } from "../src/server/auth-html.ts";
 import serverModule from "../src/server/index.ts";
 import { createSupabaseCommand } from "../src/tui/commands.ts";
-import { buildDialogModel, runAuthFlow, runDialogAction } from "../src/tui/dialog.tsx";
+import { SupabaseDialog, runAuthFlow, waitingDialogModel } from "../src/tui/dialog.tsx";
 import tuiModule from "../src/tui/index.tsx";
 
 type LogEntry = Record<string, unknown>;
@@ -38,6 +38,8 @@ function createDialogApi(overrides?: Record<string, unknown>) {
   let cleared = 0;
   let replaced = 0;
   const dialogs: unknown[] = [];
+  const dialogAlerts: unknown[] = [];
+  const dialogConfirms: unknown[] = [];
   const toasts: Array<{ variant?: string; message: string }> = [];
   const promptOps: Array<{ op: string; payload?: unknown }> = [];
   let openCalls: string[] = [];
@@ -53,8 +55,14 @@ function createDialogApi(overrides?: Record<string, unknown>) {
         dialogs.push(input);
         return input;
       },
-      DialogAlert: (input: unknown) => input,
-      DialogConfirm: (input: unknown) => input,
+      DialogAlert: (input: unknown) => {
+        dialogAlerts.push(input);
+        return input;
+      },
+      DialogConfirm: (input: unknown) => {
+        dialogConfirms.push(input);
+        return input;
+      },
       toast: (input: { variant?: string; message: string }) => {
         toasts.push(input);
       },
@@ -97,6 +105,8 @@ function createDialogApi(overrides?: Record<string, unknown>) {
     },
     __test: {
       dialogs,
+      dialogAlerts,
+      dialogConfirms,
       toasts,
       promptOps,
       get cleared() {
@@ -117,6 +127,8 @@ function createDialogApi(overrides?: Record<string, unknown>) {
   return Object.assign(api, overrides) as typeof api & {
     __test: {
       dialogs: unknown[];
+      dialogAlerts: unknown[];
+      dialogConfirms: unknown[];
       toasts: Array<{ variant?: string; message: string }>;
       promptOps: Array<{ op: string; payload?: unknown }>;
       cleared: number;
@@ -204,53 +216,15 @@ test("tui plugin registers /supabase and opens a closable dialog", async () => {
   expect(typeof replaceFactory).toBe("function");
 
   expect(typeof replaceFactory).toBe("function");
+  const rendered = replaceFactory?.() as { title?: string; message?: string };
+  expect(rendered).toMatchObject({
+    title: "Connect Supabase",
+  });
   expect(usedCustomDialog).toBe(false);
   expect(cleared).toBe(0);
 });
 
-test("dialog model describes idle, waiting, success, and error actions", () => {
-  expect(buildDialogModel({ type: "idle" })).toMatchObject({
-    title: "Connect Supabase",
-    actions: [
-      { id: "connect", label: "Connect Supabase" },
-      { id: "cancel", label: "Cancel" },
-    ],
-  });
-
-  expect(buildDialogModel({ type: "waiting_callback", url: "https://example.com/auth" })).toMatchObject({
-    status: { label: "Authorizing", tone: "warning" },
-    url: "https://example.com/auth",
-    actions: [
-      { id: "open_browser", label: "Open Browser Again" },
-      { id: "cancel", label: "Cancel" },
-    ],
-  });
-
-  expect(buildDialogModel({ type: "success" })).toMatchObject({
-    status: { label: "Connected", tone: "success" },
-    actions: [
-      { id: "list_projects", label: "List my Supabase projects" },
-      { id: "close", label: "Close" },
-    ],
-  });
-
-  expect(buildDialogModel({ type: "success" }, { canSubmitPrompt: false })).toMatchObject({
-    status: { label: "Connected", tone: "success" },
-    actions: [{ id: "close", label: "Close" }],
-  });
-
-  expect(buildDialogModel({ type: "error", message: "bad auth", url: "https://example.com/auth" })).toMatchObject({
-    status: { label: "Authorization Failed", tone: "error" },
-    url: "https://example.com/auth",
-    actions: [
-      { id: "retry", label: "Retry" },
-      { id: "open_browser", label: "Open Browser Again" },
-      { id: "close", label: "Close" },
-    ],
-  });
-});
-
-test("supabase dialog success keeps dialog open and removes durable chat writes", async () => {
+test("supabase dialog success closes and shows a toast without prompt mutation", async () => {
   const states: Array<Record<string, unknown>> = [];
   let promptCalls = 0;
   const api = createDialogApi({
@@ -289,38 +263,125 @@ test("supabase dialog success keeps dialog open and removes durable chat writes"
   await runAuthFlow({
     api: api as never,
     logger: createLogger(),
+    onSuccess: () => {
+      api.ui.toast({
+        variant: "success",
+        message: "Connected to Supabase. Try asking: list my Supabase projects",
+      });
+      api.ui.dialog.clear();
+    },
     setState: (state) => {
       states.push(state as unknown as Record<string, unknown>);
     },
   });
 
-  expect(api.__test.toasts).toEqual([]);
-  expect(api.__test.cleared).toBe(0);
+  expect(api.__test.toasts).toEqual([
+    {
+      variant: "success",
+      message: "Connected to Supabase. Try asking: list my Supabase projects",
+    },
+  ]);
+  expect(api.__test.cleared).toBe(1);
+  expect(api.__test.promptOps).toEqual([]);
   expect(promptCalls).toBe(0);
   expect(states.at(-1)).toEqual({ type: "success" });
 });
 
-test("supabase dialog success action clears, appends, submits, then closes", async () => {
+test("supabase dialog idle uses built in confirm dialog", () => {
   const api = createDialogApi();
-  const logger = createLogger();
-
-  await runDialogAction("list_projects", {
+  const dialog = SupabaseDialog({
     api: api as never,
-    logger,
+    logger: createLogger(),
     onClose: () => api.ui.dialog.clear(),
-    startOAuth: () => Promise.resolve(),
-    getState: () => ({ type: "success" }),
   });
 
-  expect(api.__test.promptOps).toEqual([
-    { op: "clearPrompt" },
-    { op: "appendPrompt", payload: { text: "list my Supabase projects" } },
-    { op: "submitPrompt" },
-  ]);
-  expect(api.__test.cleared).toBe(1);
+  expect(dialog).toMatchObject({
+    title: "Connect Supabase",
+  });
+  expect(api.__test.dialogConfirms).toHaveLength(1);
+  expect(api.__test.dialogs).toHaveLength(0);
 });
 
-test("supabase dialog error keeps url and offers recoverable actions", async () => {
+test("waiting dialog model is centered and provider-like", () => {
+  const model = waitingDialogModel("https://example.com/auth");
+
+  expect(model.wrapper).toMatchObject({
+    width: "100%",
+    height: "100%",
+    justifyContent: "center",
+    alignItems: "center",
+  });
+  expect(model.card.title).toBe("Connect Supabase");
+  expect(model.card.dismissHint).toBe("esc");
+  expect(model.card.url).toBe("https://example.com/auth");
+  expect(model.card.instructions).toBe("Complete authorization in your browser.");
+  expect(model.card.autoCloseHint).toBe("This window will close automatically.");
+  expect(model.card.waitingText).toBe("Waiting for authorization...");
+  expect(model.card.footerHints).toEqual(["o open browser again"]);
+});
+
+test("supabase auth flow enters waiting state before callback resolves", async () => {
+  const states: Array<Record<string, unknown>> = [];
+  let releaseCallback!: () => void;
+
+  const api = createDialogApi({
+    client: {
+      app: {
+        log: (_input: unknown) => Promise.resolve(true),
+      },
+      tui: {
+        clearPrompt: () => Promise.resolve({ data: true }),
+        appendPrompt: (_input: unknown) => Promise.resolve({ data: true }),
+        submitPrompt: () => Promise.resolve({ data: true }),
+      },
+      session: {
+        promptAsync: () => Promise.resolve({ data: true }),
+      },
+      provider: {
+        oauth: {
+          authorize: () => Promise.resolve({ data: { url: "https://example.com/auth", instructions: "Test", method: "manual" } }),
+          callback: () =>
+            new Promise((resolve) => {
+              releaseCallback = () => resolve({ data: true });
+            }),
+        },
+      },
+    },
+  });
+
+  const authPromise = runAuthFlow({
+    api: api as never,
+    logger: createLogger(),
+    onSuccess: () => {},
+    setState: (state) => {
+      states.push(state as unknown as Record<string, unknown>);
+    },
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(states).toContainEqual({ type: "waiting_callback", url: "https://example.com/auth" });
+
+  releaseCallback();
+  await authPromise;
+});
+
+test("supabase dialog error uses simple built in retry dialog", () => {
+  const api = createDialogApi();
+  const dialog = SupabaseDialog({
+    api: api as never,
+    logger: createLogger(),
+    onClose: () => api.ui.dialog.clear(),
+    initialState: { type: "error", message: "bad auth", url: "https://example.com/auth" },
+  });
+
+  expect(dialog).toMatchObject({
+    title: "Authorization Failed",
+  });
+  expect(api.__test.dialogConfirms).toHaveLength(1);
+  expect(api.__test.dialogs).toHaveLength(0);
+});
+
+test("supabase dialog error preserves url for retry messaging", async () => {
   const states: Array<Record<string, unknown>> = [];
   const api = createDialogApi({
     client: {
@@ -358,33 +419,24 @@ test("supabase dialog error keeps url and offers recoverable actions", async () 
   await runAuthFlow({
     api: api as never,
     logger: createLogger(),
+    onSuccess: () => {},
     setState: (state) => {
       states.push(state as unknown as Record<string, unknown>);
     },
   });
 
-  expect(api.__test.toasts).toEqual([]);
-  expect(api.__test.cleared).toBe(0);
   expect(states.at(-1)).toEqual({
     type: "error",
     message: "broker returned an invalid response",
     url: "https://example.com/auth",
   });
-
-  const model = buildDialogModel({
-    type: "error",
-    message: "broker returned an invalid response",
-    url: "https://example.com/auth",
-  });
-
-  expect(model.url).toBe("https://example.com/auth");
-  expect(model.actions.map((action) => action.id)).toEqual(["retry", "open_browser", "close"]);
 });
 
-test("auth success html is minimal handoff copy", () => {
+test("auth success html includes a small prompt snippet", () => {
   expect(HTML_SUCCESS).toContain("Authorization Successful");
   expect(HTML_SUCCESS).toContain("You can <strong>close this window</strong> and return to OpenCode.");
-  expect(HTML_SUCCESS).not.toContain("list my Supabase projects");
+  expect(HTML_SUCCESS).toContain("Try this next:");
+  expect(HTML_SUCCESS).toContain("list my Supabase projects");
 });
 
 test("supabase dialog logs auth milestones without leaking oauth query values", async () => {
@@ -414,6 +466,7 @@ test("supabase dialog logs auth milestones without leaking oauth query values", 
   await runAuthFlow({
     api: api as never,
     logger: createLogger(logs),
+    onSuccess: () => {},
     setState: () => {},
   });
 
