@@ -8,6 +8,11 @@ type SupabaseDialogProps = {
   api: TuiPluginApi;
   onClose: () => void;
   logger: SupabaseLogger;
+  initialState?: OAuthState;
+  lifecycle?: {
+    closed: boolean;
+    dismissed?: boolean;
+  };
 };
 
 type OAuthState =
@@ -15,9 +20,8 @@ type OAuthState =
   | { type: "authorizing"; url: string }
   | { type: "waiting_callback"; url: string }
   | { type: "success" }
-  | { type: "error"; message: string };
+  | { type: "error"; message: string; url?: string };
 
-// API response types
 type ApiResponse<T> = { data?: T; error?: unknown };
 
 type AuthData = {
@@ -26,96 +30,160 @@ type AuthData = {
   method: string;
 };
 
-export function SupabaseDialog(props: SupabaseDialogProps) {
-  const [state, setState] = createSignal<OAuthState>({ type: "idle" });
+type AuthFlowContext = {
+  api: TuiPluginApi;
+  logger: SupabaseLogger;
+  setState: (state: OAuthState) => void;
+  onSuccess: () => void;
+};
 
-  const startOAuth = async () => {
-    try {
-      await props.logger.info("supabase auth started", {
-        phase: "authorize",
-      });
-      setState({ type: "authorizing", url: "" });
+function getErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
+}
 
-      // Start OAuth authorization
-      const authResponse = (await props.api.client.provider.oauth.authorize({
-        providerID: "supabase",
-        method: 0,
-      })) as unknown as ApiResponse<AuthData>;
+async function openBrowser(url: string, logger: SupabaseLogger) {
+  try {
+    const open = await import("open");
+    await open.default(url);
+  } catch (error) {
+    await logger.warn("supabase browser open failed", {
+      message: getErrorMessage(error),
+    });
+  }
+}
 
-      // Handle the response shape from the plugin API
-      if (authResponse.error) {
-        throw new Error(formatAuthError("start", authResponse.error));
-      }
+export async function runAuthFlow(context: AuthFlowContext) {
+  let authURL: string | undefined;
+  let completed = false;
 
-      const authData = authResponse.data;
+  try {
+    await context.logger.info("supabase auth started", {
+      phase: "authorize",
+    });
+    context.setState({ type: "authorizing", url: "" });
 
-      if (!authData?.url) {
-        throw new Error("Invalid OAuth authorization response");
-      }
+    const authResponse = (await context.api.client.provider.oauth.authorize({
+      providerID: "supabase",
+      method: 0,
+    })) as ApiResponse<AuthData>;
 
-      const { url, method } = authData;
-      const safeUrl = new URL(url);
-      setState({ type: "authorizing", url });
-
-      await props.logger.debug("supabase auth authorize response received", {
-        method,
-        url_origin: safeUrl.origin,
-        url_path: safeUrl.pathname,
-      });
-
-      // Attempt to open browser automatically
-      if (method === "auto") {
-        try {
-          const open = await import("open");
-          await open.default(url);
-        } catch {
-          await props.logger.warn("supabase browser open failed");
-          // Browser auto-open failed, user can click the URL manually
-        }
-      }
-
-      setState({ type: "waiting_callback", url });
-      await props.logger.debug("supabase auth waiting for callback");
-
-      // Wait for callback
-      const callbackResponse = (await props.api.client.provider.oauth.callback({
-        providerID: "supabase",
-        method: 0,
-      })) as unknown as ApiResponse<boolean>;
-
-      if (callbackResponse.error) {
-        throw new Error(formatAuthError("callback", callbackResponse.error));
-      }
-
-      const callbackSucceeded = callbackResponse.data === true;
-
-      if (callbackSucceeded) {
-        await props.logger.info("supabase auth completed", {
-          status: "success",
-        });
-        setState({ type: "success" });
-        props.api.ui.toast({
-          variant: "success",
-          message:
-            "Connected to Supabase! Tools are ready to use. Ask your agent about supabase.",
-        });
-        props.onClose();
-      } else {
-        throw new Error("OAuth authorization was denied");
-      }
-    } catch (error) {
-      const message = formatAuthError("unknown", error);
-      await props.logger.error("supabase auth failed", {
-        message,
-      });
-      setState({ type: "error", message });
-      props.api.ui.toast({
-        variant: "error",
-        message,
-      });
-      props.onClose();
+    if (authResponse.error) {
+      throw new Error(formatAuthError("start", authResponse.error));
     }
+
+    const authData = authResponse.data;
+    if (!authData?.url) {
+      throw new Error("Invalid OAuth authorization response");
+    }
+
+    const { url, method } = authData;
+    authURL = url;
+    const safeUrl = new URL(url);
+    context.setState({ type: "authorizing", url });
+
+    await context.logger.debug("supabase auth authorize response received", {
+      method,
+      url_origin: safeUrl.origin,
+      url_path: safeUrl.pathname,
+    });
+
+    if (method === "auto") {
+      await openBrowser(url, context.logger);
+    }
+
+    context.setState({ type: "waiting_callback", url });
+    await context.logger.debug("supabase auth waiting for callback");
+
+    const callbackResponse = (await context.api.client.provider.oauth.callback({
+      providerID: "supabase",
+      method: 0,
+    })) as ApiResponse<boolean>;
+
+    if (callbackResponse.error) {
+      throw new Error(formatAuthError("callback", callbackResponse.error));
+    }
+
+    if (callbackResponse.data !== true) {
+      throw new Error("OAuth authorization was denied");
+    }
+
+    await context.logger.info("supabase auth completed", {
+      status: "success",
+    });
+    context.setState({ type: "success" });
+    completed = true;
+  } catch (error) {
+    const message = formatAuthError("unknown", error);
+    await context.logger.error("supabase auth failed", {
+      message,
+    });
+    context.setState({ type: "error", message, url: authURL });
+    return;
+  }
+
+  if (completed) {
+    try {
+      context.onSuccess();
+    } catch (error) {
+      await context.logger.error("supabase auth success handler failed", {
+        message: getErrorMessage(error),
+      });
+    }
+  }
+}
+
+export function SupabaseDialog(props: SupabaseDialogProps) {
+  const lifecycle = props.lifecycle ?? { closed: false };
+  const [state, setStateSignal] = createSignal<OAuthState>(props.initialState ?? { type: "idle" });
+
+  const closeDialog = (dismissed = false) => {
+    lifecycle.closed = true;
+    if (dismissed) {
+      lifecycle.dismissed = true;
+    }
+    props.onClose();
   };
+
+  const setState = (nextState: OAuthState) => {
+    if (lifecycle.closed) {
+      return;
+    }
+
+    setStateSignal(nextState);
+
+    if (nextState.type === "success") {
+      if (lifecycle.dismissed) {
+        // User dismissed waiting dialog; stay silent
+        return;
+      }
+      props.api.ui.dialog.replace(() =>
+        SupabaseDialog({
+          ...props,
+          initialState: nextState,
+          lifecycle,
+        }),
+      );
+      return;
+    }
+
+    props.api.ui.dialog.replace(() =>
+      SupabaseDialog({
+        ...props,
+        initialState: nextState,
+        lifecycle,
+      }),
+    );
+  };
+
+  const startOAuth = () =>
+    runAuthFlow({
+      api: props.api,
+      logger: props.logger,
+      setState,
+      onSuccess: () => {
+        // Success dialog handles user-facing confirmation
+      },
+    });
 
   const currentState = state();
 
@@ -125,40 +193,66 @@ export function SupabaseDialog(props: SupabaseDialogProps) {
       message:
         "This will open a browser window to authorize OpenCode to access your Supabase account. Continue?",
       onConfirm: startOAuth,
-      onCancel: props.onClose,
+      onCancel: closeDialog,
     });
   }
 
   if (currentState.type === "authorizing") {
+    if (!currentState.url) {
     return props.api.ui.DialogAlert({
       title: "Connect Supabase",
-      message: currentState.url
-        ? `Opening browser to authorize Supabase...\n\nIf the browser doesn't open automatically, visit:\n${currentState.url}`
-        : "Starting authorization...",
-      onConfirm: props.onClose,
+      message: "Starting authorization...",
+      onConfirm: () => closeDialog(true),
+    });
+    }
+
+    return props.api.ui.DialogAlert({
+      title: "Connect Supabase",
+      message: `Complete authorization in your browser.\n\nIf the browser did not open, visit:\n${currentState.url}\n\nWaiting for authorization...`,
+      onConfirm: () => closeDialog(true),
     });
   }
 
   if (currentState.type === "waiting_callback") {
     return props.api.ui.DialogAlert({
       title: "Connect Supabase",
-      message: `Waiting for authorization in your browser...\n\nIf you need to complete authorization manually, visit:\n${currentState.url}`,
-      onConfirm: props.onClose,
+      message: `Complete authorization in your browser.\n\nIf the browser did not open, visit:\n${currentState.url}\n\nWaiting for authorization...`,
+      onConfirm: () => closeDialog(true),
     });
   }
 
   if (currentState.type === "error") {
-    return props.api.ui.DialogAlert({
+    return props.api.ui.DialogConfirm({
       title: "Authorization Failed",
-      message: currentState.message,
-      onConfirm: props.onClose,
+      message: currentState.url
+        ? `${currentState.message}\n\nIf you need to retry manually, visit:\n${currentState.url}`
+        : currentState.message,
+      onConfirm: async () => {
+        if (currentState.url) {
+          await openBrowser(currentState.url, props.logger);
+        }
+        await startOAuth();
+      },
+      onCancel: closeDialog,
     });
   }
 
-  // Success state (should close immediately via onClose)
-  return props.api.ui.DialogAlert({
-    title: "Connected",
-    message: "Successfully connected to Supabase.",
-    onConfirm: props.onClose,
+  return props.api.ui.DialogConfirm({
+    title: "Connected to Supabase",
+    message:
+      "Your account is ready. Try asking:\n\n  list my Supabase projects\n  list my Supabase organizations\n  for organization <name>, list available regions\n\nRun an example?",
+    onConfirm: async () => {
+      try {
+        await props.api.client.tui.appendPrompt({
+          text: "list my Supabase projects",
+        });
+      } catch (error) {
+        await props.logger.warn("supabase append prompt failed", {
+          message: getErrorMessage(error),
+        });
+      }
+      closeDialog();
+    },
+    onCancel: closeDialog,
   });
 }
