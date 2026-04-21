@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 
+import { HTML_SUCCESS } from "../src/server/auth-html.ts";
 import serverModule from "../src/server/index.ts";
 import { createSupabaseCommand } from "../src/tui/commands.ts";
 import { SupabaseDialog } from "../src/tui/dialog.tsx";
@@ -98,9 +99,18 @@ test("tui plugin registers /supabase and opens a closable dialog", async () => {
 
 test("supabase dialog treats boolean callback success as connected", async () => {
   const toasts: Array<{ variant?: string; message: string }> = [];
+  const prompts: Array<Record<string, unknown>> = [];
   let cleared = 0;
 
   const api = {
+    route: {
+      current: {
+        name: "session",
+        params: {
+          sessionID: "session-123",
+        },
+      },
+    },
     ui: {
       DialogAlert: (input: unknown) => input,
       DialogConfirm: (input: unknown) => input,
@@ -116,6 +126,12 @@ test("supabase dialog treats boolean callback success as connected", async () =>
     client: {
       app: {
         log: (_input: unknown) => Promise.resolve(true),
+      },
+      session: {
+        promptAsync: (input: Record<string, unknown>) => {
+          prompts.push(input);
+          return Promise.resolve({ data: true });
+        },
       },
       provider: {
         oauth: {
@@ -143,7 +159,238 @@ test("supabase dialog treats boolean callback success as connected", async () =>
   expect(toasts[0]).toMatchObject({
     variant: "success",
   });
+  expect(prompts).toEqual([
+    {
+      sessionID: "session-123",
+      noReply: true,
+      parts: [
+        {
+          type: "text",
+          text: expect.stringContaining("Supabase connected. Tools are ready."),
+        },
+      ],
+    },
+  ]);
+  expect(JSON.stringify(prompts[0])).toContain("list my Supabase organizations");
+  expect(JSON.stringify(prompts[0])).toContain("list my Supabase projects");
+  expect(JSON.stringify(prompts[0])).toContain("for organization <org-slug>, list available Supabase regions");
   expect(cleared).toBe(1);
+});
+
+test("supabase dialog skips durable chat write outside session route", async () => {
+  const toasts: Array<{ variant?: string; message: string }> = [];
+  let cleared = 0;
+  let promptCalls = 0;
+
+  const api = {
+    route: {
+      current: {
+        name: "home",
+      },
+    },
+    ui: {
+      DialogAlert: (input: unknown) => input,
+      DialogConfirm: (input: unknown) => input,
+      toast: (input: { variant?: string; message: string }) => {
+        toasts.push(input);
+      },
+      dialog: {
+        clear: () => {
+          cleared += 1;
+        },
+      },
+    },
+    client: {
+      app: {
+        log: (_input: unknown) => Promise.resolve(true),
+      },
+      session: {
+        promptAsync: () => {
+          promptCalls += 1;
+          return Promise.resolve({ data: true });
+        },
+      },
+      provider: {
+        oauth: {
+          authorize: () => Promise.resolve({ data: { url: "https://example.com/auth", instructions: "Test", method: "manual" } }),
+          callback: () => Promise.resolve({ data: true }),
+        },
+      },
+    },
+  } as unknown as Parameters<typeof SupabaseDialog>[0]["api"];
+
+  const logger = {
+    debug: () => Promise.resolve(),
+    info: () => Promise.resolve(),
+    warn: () => Promise.resolve(),
+    error: () => Promise.resolve(),
+  };
+
+  const dialog = SupabaseDialog({ api, logger, onClose: () => api.ui.dialog.clear() }) as {
+    onConfirm?: () => Promise<void>;
+  };
+
+  await dialog.onConfirm?.();
+
+  expect(toasts).toHaveLength(1);
+  expect(promptCalls).toBe(0);
+  expect(cleared).toBe(1);
+});
+
+test("supabase dialog still succeeds when durable chat write fails", async () => {
+  const toasts: Array<{ variant?: string; message: string }> = [];
+  const logMessages: Array<Record<string, unknown>> = [];
+  let cleared = 0;
+
+  const api = {
+    route: {
+      current: {
+        name: "session",
+        params: {
+          sessionID: "session-123",
+        },
+      },
+    },
+    ui: {
+      DialogAlert: (input: unknown) => input,
+      DialogConfirm: (input: unknown) => input,
+      toast: (input: { variant?: string; message: string }) => {
+        toasts.push(input);
+      },
+      dialog: {
+        clear: () => {
+          cleared += 1;
+        },
+      },
+    },
+    client: {
+      app: {
+        log: (input: Record<string, unknown>) => {
+          logMessages.push(input);
+          return Promise.resolve(true);
+        },
+      },
+      session: {
+        promptAsync: () => Promise.reject(new Error("chat write failed")),
+      },
+      provider: {
+        oauth: {
+          authorize: () => Promise.resolve({ data: { url: "https://example.com/auth", instructions: "Test", method: "manual" } }),
+          callback: () => Promise.resolve({ data: true }),
+        },
+      },
+    },
+  } as unknown as Parameters<typeof SupabaseDialog>[0]["api"];
+
+  const logger = {
+    debug: async (message: string, extra?: Record<string, unknown>) => {
+      await api.client.app.log({ service: "opencode-supabase", level: "debug", message, extra });
+    },
+    info: async (message: string, extra?: Record<string, unknown>) => {
+      await api.client.app.log({ service: "opencode-supabase", level: "info", message, extra });
+    },
+    warn: async (message: string, extra?: Record<string, unknown>) => {
+      await api.client.app.log({ service: "opencode-supabase", level: "warn", message, extra });
+    },
+    error: async (message: string, extra?: Record<string, unknown>) => {
+      await api.client.app.log({ service: "opencode-supabase", level: "error", message, extra });
+    },
+  };
+
+  const dialog = SupabaseDialog({ api, logger, onClose: () => api.ui.dialog.clear() }) as {
+    onConfirm?: () => Promise<void>;
+  };
+
+  await dialog.onConfirm?.();
+
+  expect(toasts).toHaveLength(1);
+  expect(toasts[0]).toMatchObject({ variant: "success" });
+  expect(cleared).toBe(1);
+  expect(JSON.stringify(logMessages)).toContain("supabase auth chat write failed");
+  expect(JSON.stringify(logMessages)).toContain("chat write failed");
+});
+
+test("supabase dialog logs durable chat result errors without failing auth", async () => {
+  const toasts: Array<{ variant?: string; message: string }> = [];
+  const logMessages: Array<Record<string, unknown>> = [];
+  let cleared = 0;
+
+  const api = {
+    route: {
+      current: {
+        name: "session",
+        params: {
+          sessionID: "session-123",
+        },
+      },
+    },
+    ui: {
+      DialogAlert: (input: unknown) => input,
+      DialogConfirm: (input: unknown) => input,
+      toast: (input: { variant?: string; message: string }) => {
+        toasts.push(input);
+      },
+      dialog: {
+        clear: () => {
+          cleared += 1;
+        },
+      },
+    },
+    client: {
+      app: {
+        log: (input: Record<string, unknown>) => {
+          logMessages.push(input);
+          return Promise.resolve(true);
+        },
+      },
+      session: {
+        promptAsync: () => Promise.resolve({
+          error: {
+            message: "chat write failed via result",
+          },
+        }),
+      },
+      provider: {
+        oauth: {
+          authorize: () => Promise.resolve({ data: { url: "https://example.com/auth", instructions: "Test", method: "manual" } }),
+          callback: () => Promise.resolve({ data: true }),
+        },
+      },
+    },
+  } as unknown as Parameters<typeof SupabaseDialog>[0]["api"];
+
+  const logger = {
+    debug: async (message: string, extra?: Record<string, unknown>) => {
+      await api.client.app.log({ service: "opencode-supabase", level: "debug", message, extra });
+    },
+    info: async (message: string, extra?: Record<string, unknown>) => {
+      await api.client.app.log({ service: "opencode-supabase", level: "info", message, extra });
+    },
+    warn: async (message: string, extra?: Record<string, unknown>) => {
+      await api.client.app.log({ service: "opencode-supabase", level: "warn", message, extra });
+    },
+    error: async (message: string, extra?: Record<string, unknown>) => {
+      await api.client.app.log({ service: "opencode-supabase", level: "error", message, extra });
+    },
+  };
+
+  const dialog = SupabaseDialog({ api, logger, onClose: () => api.ui.dialog.clear() }) as {
+    onConfirm?: () => Promise<void>;
+  };
+
+  await dialog.onConfirm?.();
+
+  expect(toasts).toHaveLength(1);
+  expect(toasts[0]).toMatchObject({ variant: "success" });
+  expect(cleared).toBe(1);
+  expect(JSON.stringify(logMessages)).toContain("supabase auth chat write failed");
+  expect(JSON.stringify(logMessages)).toContain("chat write failed via result");
+});
+
+test("auth success html includes a concrete next step", () => {
+  expect(HTML_SUCCESS).toContain("Authorization Successful");
+  expect(HTML_SUCCESS).toContain("You can <strong>close this window</strong> and return to OpenCode.");
+  expect(HTML_SUCCESS).toContain('Next, try asking OpenCode to <strong>"list my Supabase projects"</strong>.');
 });
 
 test("supabase dialog logs auth milestones without leaking oauth query values", async () => {

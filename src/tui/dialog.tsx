@@ -26,6 +26,25 @@ type AuthData = {
   method: string;
 };
 
+type SessionPromptResult = { data?: unknown; error?: unknown };
+
+const AUTH_SUCCESS_CHAT_MESSAGE = `Supabase connected. Tools are ready.
+
+Try asking:
+- list my Supabase organizations
+- list my Supabase projects
+- for organization <org-slug>, list available Supabase regions`;
+
+function activeSessionID(api: TuiPluginApi) {
+  const current = api.route.current;
+  if (current.name !== "session") {
+    return undefined;
+  }
+
+  const { sessionID } = current.params ?? {};
+  return typeof sessionID === "string" ? sessionID : undefined;
+}
+
 export function SupabaseDialog(props: SupabaseDialogProps) {
   const [state, setState] = createSignal<OAuthState>({ type: "idle" });
 
@@ -94,6 +113,29 @@ export function SupabaseDialog(props: SupabaseDialogProps) {
           status: "success",
         });
         setState({ type: "success" });
+        const sessionID = activeSessionID(props.api);
+        if (sessionID) {
+          try {
+            const promptResult = (await props.api.client.session.promptAsync({
+              sessionID,
+              noReply: true,
+              parts: [
+                {
+                  type: "text",
+                  text: AUTH_SUCCESS_CHAT_MESSAGE,
+                },
+              ],
+            })) as SessionPromptResult;
+
+            if (promptResult.error) {
+              throw new Error(formatAuthError("unknown", promptResult.error));
+            }
+          } catch (error) {
+            await props.logger.warn("supabase auth chat write failed", {
+              message: error instanceof Error ? error.message : String(error),
+            });
+          }
+        }
         props.api.ui.toast({
           variant: "success",
           message:
