@@ -228,9 +228,6 @@ export function SupabaseDialog(props: SupabaseDialogProps) {
         ? `${currentState.message}\n\nIf you need to retry manually, visit:\n${currentState.url}`
         : currentState.message,
       onConfirm: async () => {
-        if (currentState.url) {
-          await openBrowser(currentState.url, props.logger);
-        }
         await startOAuth();
       },
       onCancel: closeDialog,
