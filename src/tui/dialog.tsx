@@ -1,6 +1,4 @@
 import type { TuiPluginApi } from "@opencode-ai/plugin/tui";
-import type { BaseRenderable } from "@opentui/core";
-import { createElement, insertNode, setProp } from "@opentui/solid";
 import { createSignal } from "solid-js";
 
 import { formatAuthError } from "../shared/auth-errors.ts";
@@ -38,44 +36,8 @@ type AuthFlowContext = {
   onSuccess: () => void;
 };
 
-type WaitingDialogModel = {
-  wrapper: {
-    width: "100%";
-    height: "100%";
-    justifyContent: "center";
-    alignItems: "center";
-  };
-  card: {
-    title: string;
-    dismissHint: string;
-    url: string;
-    instructions: string;
-    autoCloseHint: string;
-    waitingText: string;
-    footerHints: [string];
-  };
-};
-
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
-}
-
-function renderable(tag: string, props: Record<string, unknown>, children: BaseRenderable[] = []) {
-  const node = createElement(tag);
-
-  for (const [key, value] of Object.entries(props)) {
-    setProp(node, key, value);
-  }
-
-  for (const child of children) {
-    insertNode(node, child);
-  }
-
-  return node;
-}
-
-function text(content: string, props: Record<string, unknown> = {}) {
-  return renderable("text", { ...props, content });
 }
 
 async function openBrowser(url: string, logger: SupabaseLogger) {
@@ -87,84 +49,6 @@ async function openBrowser(url: string, logger: SupabaseLogger) {
       message: getErrorMessage(error),
     });
   }
-}
-
-export function waitingDialogModel(url: string): WaitingDialogModel {
-  return {
-    wrapper: {
-      width: "100%",
-      height: "100%",
-      justifyContent: "center",
-      alignItems: "center",
-    },
-    card: {
-      title: "Connect Supabase",
-      dismissHint: "esc",
-      url,
-      instructions: "Complete authorization in your browser.",
-      autoCloseHint: "This window will close automatically.",
-      waitingText: "Waiting for authorization...",
-      footerHints: ["o open browser again"],
-    },
-  };
-}
-
-function waitingDialog(url: string, logger: SupabaseLogger) {
-  const model = waitingDialogModel(url);
-
-  return renderable(
-    "box",
-    {
-      ...model.wrapper,
-      flexDirection: "column",
-      onKeyDown: (key: { name?: string }) => {
-        if (key.name === "o" || key.name === "return") {
-          void openBrowser(url, logger);
-        }
-      },
-    },
-    [
-      renderable(
-        "box",
-        {
-          flexDirection: "column",
-          gap: 1,
-          paddingX: 2,
-          paddingY: 1,
-          width: "80%",
-          maxWidth: 80,
-        },
-        [
-          renderable(
-            "box",
-            {
-              flexDirection: "row",
-              justifyContent: "space-between",
-            },
-            [text(model.card.title, { bold: true }), text(model.card.dismissHint, { fg: "#8b8b8b" })],
-          ),
-          renderable("text", {
-            content: model.card.url,
-            fg: "#3ECF8E",
-            onMouseUp: () => {
-              void openBrowser(url, logger);
-            },
-          }),
-          text(model.card.instructions, { fg: "#8b8b8b" }),
-          text(model.card.autoCloseHint, { fg: "#8b8b8b" }),
-          text(model.card.waitingText, { fg: "#8b8b8b" }),
-          renderable(
-            "box",
-            {
-              flexDirection: "row",
-              gap: 2,
-            },
-            [text(model.card.footerHints[0], { fg: "#8b8b8b" })],
-          ),
-        ],
-      ),
-    ],
-  );
 }
 
 export async function runAuthFlow(context: AuthFlowContext) {
@@ -311,18 +195,18 @@ export function SupabaseDialog(props: SupabaseDialogProps) {
       });
     }
 
-    return props.api.ui.Dialog({
-      size: "large",
-      onClose: closeDialog,
-      children: waitingDialog(currentState.url, props.logger),
+    return props.api.ui.DialogAlert({
+      title: "Connect Supabase",
+      message: `Complete authorization in your browser.\n\nIf the browser did not open, visit:\n${currentState.url}\n\nWaiting for authorization...`,
+      onConfirm: closeDialog,
     });
   }
 
   if (currentState.type === "waiting_callback") {
-    return props.api.ui.Dialog({
-      size: "large",
-      onClose: closeDialog,
-      children: waitingDialog(currentState.url, props.logger),
+    return props.api.ui.DialogAlert({
+      title: "Connect Supabase",
+      message: `Complete authorization in your browser.\n\nIf the browser did not open, visit:\n${currentState.url}\n\nWaiting for authorization...`,
+      onConfirm: closeDialog,
     });
   }
 

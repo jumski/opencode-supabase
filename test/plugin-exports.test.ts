@@ -3,7 +3,7 @@ import { expect, test } from "bun:test";
 import { HTML_SUCCESS } from "../src/server/auth-html.ts";
 import serverModule from "../src/server/index.ts";
 import { createSupabaseCommand } from "../src/tui/commands.ts";
-import { SupabaseDialog, runAuthFlow, waitingDialogModel } from "../src/tui/dialog.tsx";
+import { SupabaseDialog, runAuthFlow } from "../src/tui/dialog.tsx";
 import tuiModule from "../src/tui/index.tsx";
 
 type LogEntry = Record<string, unknown>;
@@ -302,22 +302,20 @@ test("supabase dialog idle uses built in confirm dialog", () => {
   expect(api.__test.dialogs).toHaveLength(0);
 });
 
-test("waiting dialog model is centered and provider-like", () => {
-  const model = waitingDialogModel("https://example.com/auth");
-
-  expect(model.wrapper).toMatchObject({
-    width: "100%",
-    height: "100%",
-    justifyContent: "center",
-    alignItems: "center",
+test("supabase dialog waiting states use built in alert dialog", () => {
+  const api = createDialogApi();
+  const waiting = SupabaseDialog({
+    api: api as never,
+    logger: createLogger(),
+    onClose: () => api.ui.dialog.clear(),
+    initialState: { type: "waiting_callback", url: "https://example.com/auth" },
   });
-  expect(model.card.title).toBe("Connect Supabase");
-  expect(model.card.dismissHint).toBe("esc");
-  expect(model.card.url).toBe("https://example.com/auth");
-  expect(model.card.instructions).toBe("Complete authorization in your browser.");
-  expect(model.card.autoCloseHint).toBe("This window will close automatically.");
-  expect(model.card.waitingText).toBe("Waiting for authorization...");
-  expect(model.card.footerHints).toEqual(["o open browser again"]);
+
+  expect(waiting).toMatchObject({
+    title: "Connect Supabase",
+  });
+  expect(api.__test.dialogAlerts).toHaveLength(1);
+  expect(api.__test.dialogs).toHaveLength(0);
 });
 
 test("supabase auth flow enters waiting state before callback resolves", async () => {
