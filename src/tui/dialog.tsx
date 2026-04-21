@@ -11,6 +11,7 @@ type SupabaseDialogProps = {
   initialState?: OAuthState;
   lifecycle?: {
     closed: boolean;
+    dismissed?: boolean;
   };
 };
 
@@ -135,8 +136,11 @@ export function SupabaseDialog(props: SupabaseDialogProps) {
   const lifecycle = props.lifecycle ?? { closed: false };
   const [state, setStateSignal] = createSignal<OAuthState>(props.initialState ?? { type: "idle" });
 
-  const closeDialog = () => {
+  const closeDialog = (dismissed = false) => {
     lifecycle.closed = true;
+    if (dismissed) {
+      lifecycle.dismissed = true;
+    }
     props.onClose();
   };
 
@@ -148,6 +152,17 @@ export function SupabaseDialog(props: SupabaseDialogProps) {
     setStateSignal(nextState);
 
     if (nextState.type === "success") {
+      if (lifecycle.dismissed) {
+        // User dismissed waiting dialog; stay silent
+        return;
+      }
+      props.api.ui.dialog.replace(() =>
+        SupabaseDialog({
+          ...props,
+          initialState: nextState,
+          lifecycle,
+        }),
+      );
       return;
     }
 
@@ -188,17 +203,17 @@ export function SupabaseDialog(props: SupabaseDialogProps) {
 
   if (currentState.type === "authorizing") {
     if (!currentState.url) {
-      return props.api.ui.DialogAlert({
-        title: "Connect Supabase",
-        message: "Starting authorization...",
-        onConfirm: closeDialog,
-      });
+    return props.api.ui.DialogAlert({
+      title: "Connect Supabase",
+      message: "Starting authorization...",
+      onConfirm: () => closeDialog(true),
+    });
     }
 
     return props.api.ui.DialogAlert({
       title: "Connect Supabase",
       message: `Complete authorization in your browser.\n\nIf the browser did not open, visit:\n${currentState.url}\n\nWaiting for authorization...`,
-      onConfirm: closeDialog,
+      onConfirm: () => closeDialog(true),
     });
   }
 
@@ -206,7 +221,7 @@ export function SupabaseDialog(props: SupabaseDialogProps) {
     return props.api.ui.DialogAlert({
       title: "Connect Supabase",
       message: `Complete authorization in your browser.\n\nIf the browser did not open, visit:\n${currentState.url}\n\nWaiting for authorization...`,
-      onConfirm: closeDialog,
+      onConfirm: () => closeDialog(true),
     });
   }
 
@@ -226,9 +241,22 @@ export function SupabaseDialog(props: SupabaseDialogProps) {
     });
   }
 
-  return props.api.ui.DialogAlert({
-    title: "Connected",
-    message: "Successfully connected to Supabase.",
-    onConfirm: closeDialog,
+  return props.api.ui.DialogConfirm({
+    title: "Connected to Supabase",
+    message:
+      "Your account is ready. Try asking:\n\n  list my Supabase projects\n  list my Supabase organizations\n  for organization <name>, list available regions\n\nRun an example?",
+    onConfirm: async () => {
+      try {
+        await props.api.client.tui.appendPrompt({
+          text: "list my Supabase projects",
+        });
+      } catch (error) {
+        await props.logger.warn("supabase append prompt failed", {
+          message: getErrorMessage(error),
+        });
+      }
+      closeDialog();
+    },
+    onCancel: closeDialog,
   });
 }

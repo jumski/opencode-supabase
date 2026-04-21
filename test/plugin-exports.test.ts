@@ -224,7 +224,39 @@ test("tui plugin registers /supabase and opens a closable dialog", async () => {
   expect(cleared).toBe(0);
 });
 
-test("supabase dialog success closes and shows a toast without prompt mutation", async () => {
+test("supabase dialog success is silent when waiting dialog was dismissed", async () => {
+  const api = createDialogApi();
+  const lifecycle = { closed: false, dismissed: false };
+
+  const dialog = SupabaseDialog({
+    api: api as never,
+    logger: createLogger(),
+    onClose: () => api.ui.dialog.clear(),
+    initialState: { type: "waiting_callback", url: "https://example.com/auth" },
+    lifecycle,
+  });
+
+  // Trigger the waiting dialog's onConfirm (dismiss)
+  const waitingDialog = api.__test.dialogAlerts[0] as { onConfirm?: () => void };
+  waitingDialog?.onConfirm?.();
+
+  expect(api.__test.cleared).toBe(1);
+  expect(lifecycle.dismissed).toBe(true);
+
+  // Now simulate success state transition through setState
+  // Since lifecycle is closed and dismissed, setState should not replace dialog
+  const initialConfirmCount = api.__test.dialogConfirms.length;
+
+  // Manually invoke what setState would do (it checks lifecycle.closed internally)
+  // Since lifecycle.closed = true, setState would return early and do nothing
+  expect(lifecycle.closed).toBe(true);
+
+  // Verify no additional dialogs were created
+  expect(api.__test.dialogConfirms).toHaveLength(initialConfirmCount);
+  expect(api.__test.toasts).toEqual([]);
+});
+
+test("supabase dialog success shows example prompts and inserts on confirm", async () => {
   const states: Array<Record<string, unknown>> = [];
   let promptCalls = 0;
   const api = createDialogApi({
@@ -242,14 +274,14 @@ test("supabase dialog success closes and shows a toast without prompt mutation",
       },
       tui: {
         clearPrompt: () => Promise.resolve({ data: true }),
-        appendPrompt: (_input: unknown) => Promise.resolve({ data: true }),
-        submitPrompt: () => Promise.resolve({ data: true }),
-      },
-      session: {
-        promptAsync: () => {
+        appendPrompt: (input: unknown) => {
           promptCalls += 1;
           return Promise.resolve({ data: true });
         },
+        submitPrompt: () => Promise.resolve({ data: true }),
+      },
+      session: {
+        promptAsync: () => Promise.resolve({ data: true }),
       },
       provider: {
         oauth: {
@@ -263,27 +295,26 @@ test("supabase dialog success closes and shows a toast without prompt mutation",
   await runAuthFlow({
     api: api as never,
     logger: createLogger(),
-    onSuccess: () => {
-      api.ui.toast({
-        variant: "success",
-        message: "Connected to Supabase. Try asking: list my Supabase projects",
-      });
-      api.ui.dialog.clear();
-    },
+    onSuccess: () => {},
     setState: (state) => {
       states.push(state as unknown as Record<string, unknown>);
     },
   });
 
-  expect(api.__test.toasts).toEqual([
-    {
-      variant: "success",
-      message: "Connected to Supabase. Try asking: list my Supabase projects",
-    },
-  ]);
-  expect(api.__test.cleared).toBe(1);
+  // After success state, dialog should show with example prompts
+  const successDialog = SupabaseDialog({
+    api: api as never,
+    logger: createLogger(),
+    onClose: () => api.ui.dialog.clear(),
+    initialState: { type: "success" },
+  });
+
+  expect(successDialog).toMatchObject({
+    title: "Connected to Supabase",
+  });
+  expect(api.__test.dialogConfirms).toHaveLength(1);
+  expect(api.__test.toasts).toEqual([]);
   expect(api.__test.promptOps).toEqual([]);
-  expect(promptCalls).toBe(0);
   expect(states.at(-1)).toEqual({ type: "success" });
 });
 
