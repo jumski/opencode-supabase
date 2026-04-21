@@ -181,11 +181,7 @@ export function SupabaseDialog(props: SupabaseDialogProps) {
       logger: props.logger,
       setState,
       onSuccess: () => {
-        props.api.ui.toast({
-          variant: "success",
-          message: "Connected to Supabase. Try asking: list my Supabase projects",
-        });
-        closeDialog();
+        // Success dialog handles user-facing confirmation
       },
     });
 
