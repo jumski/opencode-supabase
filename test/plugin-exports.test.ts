@@ -3,8 +3,128 @@ import { expect, test } from "bun:test";
 import { HTML_SUCCESS } from "../src/server/auth-html.ts";
 import serverModule from "../src/server/index.ts";
 import { createSupabaseCommand } from "../src/tui/commands.ts";
-import { SupabaseDialog } from "../src/tui/dialog.tsx";
+import { buildDialogModel, runAuthFlow, runDialogAction } from "../src/tui/dialog.tsx";
 import tuiModule from "../src/tui/index.tsx";
+
+type LogEntry = Record<string, unknown>;
+
+function createLogger(logs?: LogEntry[]) {
+  if (!logs) {
+    return {
+      debug: () => Promise.resolve(),
+      info: () => Promise.resolve(),
+      warn: () => Promise.resolve(),
+      error: () => Promise.resolve(),
+    };
+  }
+
+  return {
+    debug: async (message: string, extra?: Record<string, unknown>) => {
+      logs.push({ level: "debug", message, extra });
+    },
+    info: async (message: string, extra?: Record<string, unknown>) => {
+      logs.push({ level: "info", message, extra });
+    },
+    warn: async (message: string, extra?: Record<string, unknown>) => {
+      logs.push({ level: "warn", message, extra });
+    },
+    error: async (message: string, extra?: Record<string, unknown>) => {
+      logs.push({ level: "error", message, extra });
+    },
+  };
+}
+
+function createDialogApi(overrides?: Record<string, unknown>) {
+  let cleared = 0;
+  let replaced = 0;
+  const dialogs: unknown[] = [];
+  const toasts: Array<{ variant?: string; message: string }> = [];
+  const promptOps: Array<{ op: string; payload?: unknown }> = [];
+  let openCalls: string[] = [];
+
+  const api = {
+    route: {
+      current: {
+        name: "home",
+      },
+    },
+    ui: {
+      Dialog: (input: unknown) => {
+        dialogs.push(input);
+        return input;
+      },
+      DialogAlert: (input: unknown) => input,
+      DialogConfirm: (input: unknown) => input,
+      toast: (input: { variant?: string; message: string }) => {
+        toasts.push(input);
+      },
+      dialog: {
+        replace: () => {
+          replaced += 1;
+        },
+        clear: () => {
+          cleared += 1;
+        },
+      },
+    },
+    client: {
+      app: {
+        log: (_input: unknown) => Promise.resolve(true),
+      },
+      tui: {
+        clearPrompt: () => {
+          promptOps.push({ op: "clearPrompt" });
+          return Promise.resolve({ data: true });
+        },
+        appendPrompt: (input: unknown) => {
+          promptOps.push({ op: "appendPrompt", payload: input });
+          return Promise.resolve({ data: true });
+        },
+        submitPrompt: () => {
+          promptOps.push({ op: "submitPrompt" });
+          return Promise.resolve({ data: true });
+        },
+      },
+      session: {
+        promptAsync: () => Promise.resolve({ data: true }),
+      },
+      provider: {
+        oauth: {
+          authorize: () => Promise.resolve({ data: { url: "https://example.com/auth", instructions: "Test", method: "manual" } }),
+          callback: () => Promise.resolve({ data: true }),
+        },
+      },
+    },
+    __test: {
+      dialogs,
+      toasts,
+      promptOps,
+      get cleared() {
+        return cleared;
+      },
+      get replaced() {
+        return replaced;
+      },
+      get openCalls() {
+        return openCalls;
+      },
+      set openCalls(value: string[]) {
+        openCalls = value;
+      },
+    },
+  };
+
+  return Object.assign(api, overrides) as typeof api & {
+    __test: {
+      dialogs: unknown[];
+      toasts: Array<{ variant?: string; message: string }>;
+      promptOps: Array<{ op: string; payload?: unknown }>;
+      cleared: number;
+      replaced: number;
+      openCalls: string[];
+    };
+  };
+}
 
 test("server plugin exports supabase id and server hook", () => {
   expect(serverModule.id).toBe("supabase");
@@ -32,7 +152,7 @@ test("tui plugin registers /supabase and opens a closable dialog", async () => {
   let commandsFactory: (() => Array<Record<string, unknown>>) | undefined;
   let replaceFactory: (() => unknown) | undefined;
   let cleared = 0;
-  let lastDialogState: string | undefined;
+  let usedCustomDialog = false;
 
   await tuiModule.tui(
     {
@@ -43,14 +163,12 @@ test("tui plugin registers /supabase and opens a closable dialog", async () => {
         },
       },
       ui: {
-        DialogAlert: (input: { title?: string; message?: string }) => {
-          lastDialogState = "alert";
+        Dialog: (input: unknown) => {
+          usedCustomDialog = true;
           return input;
         },
-        DialogConfirm: (input: { title?: string; message?: string }) => {
-          lastDialogState = "confirm";
-          return input;
-        },
+        DialogAlert: (input: unknown) => input,
+        DialogConfirm: (input: unknown) => input,
         dialog: {
           replace: (factory: () => unknown) => {
             replaceFactory = factory;
@@ -85,24 +203,57 @@ test("tui plugin registers /supabase and opens a closable dialog", async () => {
   command?.onSelect?.();
   expect(typeof replaceFactory).toBe("function");
 
-  // The dialog starts in "idle" state and shows DialogConfirm
-  const dialog = replaceFactory?.() as { title?: string; message?: string; onConfirm?: () => void; onCancel?: () => void } | undefined;
-  expect(dialog?.title).toBe("Connect Supabase");
-  expect(lastDialogState).toBe("confirm");
-  expect(typeof dialog?.onConfirm).toBe("function");
-  expect(typeof dialog?.onCancel).toBe("function");
-
-  // Cancel should clear the dialog immediately
-  dialog?.onCancel?.();
-  expect(cleared).toBe(1);
+  expect(typeof replaceFactory).toBe("function");
+  expect(usedCustomDialog).toBe(false);
+  expect(cleared).toBe(0);
 });
 
-test("supabase dialog treats boolean callback success as connected", async () => {
-  const toasts: Array<{ variant?: string; message: string }> = [];
-  const prompts: Array<Record<string, unknown>> = [];
-  let cleared = 0;
+test("dialog model describes idle, waiting, success, and error actions", () => {
+  expect(buildDialogModel({ type: "idle" })).toMatchObject({
+    title: "Connect Supabase",
+    actions: [
+      { id: "connect", label: "Connect Supabase" },
+      { id: "cancel", label: "Cancel" },
+    ],
+  });
 
-  const api = {
+  expect(buildDialogModel({ type: "waiting_callback", url: "https://example.com/auth" })).toMatchObject({
+    status: { label: "Authorizing", tone: "warning" },
+    url: "https://example.com/auth",
+    actions: [
+      { id: "open_browser", label: "Open Browser Again" },
+      { id: "cancel", label: "Cancel" },
+    ],
+  });
+
+  expect(buildDialogModel({ type: "success" })).toMatchObject({
+    status: { label: "Connected", tone: "success" },
+    actions: [
+      { id: "list_projects", label: "List my Supabase projects" },
+      { id: "close", label: "Close" },
+    ],
+  });
+
+  expect(buildDialogModel({ type: "success" }, { canSubmitPrompt: false })).toMatchObject({
+    status: { label: "Connected", tone: "success" },
+    actions: [{ id: "close", label: "Close" }],
+  });
+
+  expect(buildDialogModel({ type: "error", message: "bad auth", url: "https://example.com/auth" })).toMatchObject({
+    status: { label: "Authorization Failed", tone: "error" },
+    url: "https://example.com/auth",
+    actions: [
+      { id: "retry", label: "Retry" },
+      { id: "open_browser", label: "Open Browser Again" },
+      { id: "close", label: "Close" },
+    ],
+  });
+});
+
+test("supabase dialog success keeps dialog open and removes durable chat writes", async () => {
+  const states: Array<Record<string, unknown>> = [];
+  let promptCalls = 0;
+  const api = createDialogApi({
     route: {
       current: {
         name: "session",
@@ -111,98 +262,14 @@ test("supabase dialog treats boolean callback success as connected", async () =>
         },
       },
     },
-    ui: {
-      DialogAlert: (input: unknown) => input,
-      DialogConfirm: (input: unknown) => input,
-      toast: (input: { variant?: string; message: string }) => {
-        toasts.push(input);
-      },
-      dialog: {
-        clear: () => {
-          cleared += 1;
-        },
-      },
-    },
     client: {
       app: {
         log: (_input: unknown) => Promise.resolve(true),
       },
-      session: {
-        promptAsync: (input: Record<string, unknown>) => {
-          prompts.push(input);
-          return Promise.resolve({ data: true });
-        },
-      },
-      provider: {
-        oauth: {
-          authorize: () => Promise.resolve({ data: { url: "https://example.com/auth", instructions: "Test", method: "manual" } }),
-          callback: () => Promise.resolve({ data: true }),
-        },
-      },
-    },
-  } as unknown as Parameters<typeof SupabaseDialog>[0]["api"];
-
-  const logger = {
-    debug: () => Promise.resolve(),
-    info: () => Promise.resolve(),
-    warn: () => Promise.resolve(),
-    error: () => Promise.resolve(),
-  };
-
-  const dialog = SupabaseDialog({ api, logger, onClose: () => api.ui.dialog.clear() }) as {
-    onConfirm?: () => Promise<void>;
-  };
-
-  await dialog.onConfirm?.();
-
-  expect(toasts).toHaveLength(1);
-  expect(toasts[0]).toMatchObject({
-    variant: "success",
-  });
-  expect(prompts).toEqual([
-    {
-      sessionID: "session-123",
-      noReply: true,
-      parts: [
-        {
-          type: "text",
-          text: expect.stringContaining("Supabase connected. Tools are ready."),
-        },
-      ],
-    },
-  ]);
-  expect(JSON.stringify(prompts[0])).toContain("list my Supabase organizations");
-  expect(JSON.stringify(prompts[0])).toContain("list my Supabase projects");
-  expect(JSON.stringify(prompts[0])).toContain("for organization <org-slug>, list available Supabase regions");
-  expect(cleared).toBe(1);
-});
-
-test("supabase dialog skips durable chat write outside session route", async () => {
-  const toasts: Array<{ variant?: string; message: string }> = [];
-  let cleared = 0;
-  let promptCalls = 0;
-
-  const api = {
-    route: {
-      current: {
-        name: "home",
-      },
-    },
-    ui: {
-      DialogAlert: (input: unknown) => input,
-      DialogConfirm: (input: unknown) => input,
-      toast: (input: { variant?: string; message: string }) => {
-        toasts.push(input);
-      },
-      dialog: {
-        clear: () => {
-          cleared += 1;
-        },
-      },
-    },
-    client: {
-      app: {
-        log: (_input: unknown) => Promise.resolve(true),
+      tui: {
+        clearPrompt: () => Promise.resolve({ data: true }),
+        appendPrompt: (_input: unknown) => Promise.resolve({ data: true }),
+        submitPrompt: () => Promise.resolve({ data: true }),
       },
       session: {
         promptAsync: () => {
@@ -217,203 +284,123 @@ test("supabase dialog skips durable chat write outside session route", async () 
         },
       },
     },
-  } as unknown as Parameters<typeof SupabaseDialog>[0]["api"];
+  });
 
-  const logger = {
-    debug: () => Promise.resolve(),
-    info: () => Promise.resolve(),
-    warn: () => Promise.resolve(),
-    error: () => Promise.resolve(),
-  };
+  await runAuthFlow({
+    api: api as never,
+    logger: createLogger(),
+    setState: (state) => {
+      states.push(state as unknown as Record<string, unknown>);
+    },
+  });
 
-  const dialog = SupabaseDialog({ api, logger, onClose: () => api.ui.dialog.clear() }) as {
-    onConfirm?: () => Promise<void>;
-  };
-
-  await dialog.onConfirm?.();
-
-  expect(toasts).toHaveLength(1);
+  expect(api.__test.toasts).toEqual([]);
+  expect(api.__test.cleared).toBe(0);
   expect(promptCalls).toBe(0);
-  expect(cleared).toBe(1);
+  expect(states.at(-1)).toEqual({ type: "success" });
 });
 
-test("supabase dialog still succeeds when durable chat write fails", async () => {
-  const toasts: Array<{ variant?: string; message: string }> = [];
-  const logMessages: Array<Record<string, unknown>> = [];
-  let cleared = 0;
+test("supabase dialog success action clears, appends, submits, then closes", async () => {
+  const api = createDialogApi();
+  const logger = createLogger();
 
-  const api = {
-    route: {
-      current: {
-        name: "session",
-        params: {
-          sessionID: "session-123",
-        },
-      },
-    },
-    ui: {
-      DialogAlert: (input: unknown) => input,
-      DialogConfirm: (input: unknown) => input,
-      toast: (input: { variant?: string; message: string }) => {
-        toasts.push(input);
-      },
-      dialog: {
-        clear: () => {
-          cleared += 1;
-        },
-      },
-    },
+  await runDialogAction("list_projects", {
+    api: api as never,
+    logger,
+    onClose: () => api.ui.dialog.clear(),
+    startOAuth: () => Promise.resolve(),
+    getState: () => ({ type: "success" }),
+  });
+
+  expect(api.__test.promptOps).toEqual([
+    { op: "clearPrompt" },
+    { op: "appendPrompt", payload: { text: "list my Supabase projects" } },
+    { op: "submitPrompt" },
+  ]);
+  expect(api.__test.cleared).toBe(1);
+});
+
+test("supabase dialog error keeps url and offers recoverable actions", async () => {
+  const states: Array<Record<string, unknown>> = [];
+  const api = createDialogApi({
     client: {
       app: {
-        log: (input: Record<string, unknown>) => {
-          logMessages.push(input);
-          return Promise.resolve(true);
-        },
+        log: (_input: unknown) => Promise.resolve(true),
+      },
+      tui: {
+        clearPrompt: () => Promise.resolve({ data: true }),
+        appendPrompt: (_input: unknown) => Promise.resolve({ data: true }),
+        submitPrompt: () => Promise.resolve({ data: true }),
       },
       session: {
-        promptAsync: () => Promise.reject(new Error("chat write failed")),
+        promptAsync: () => Promise.resolve({ data: true }),
       },
       provider: {
         oauth: {
           authorize: () => Promise.resolve({ data: { url: "https://example.com/auth", instructions: "Test", method: "manual" } }),
-          callback: () => Promise.resolve({ data: true }),
+          callback: () => Promise.resolve({
+            error: {
+              data: {
+                name: "UnknownError",
+                data: {
+                  message: "broker returned an invalid response",
+                },
+              },
+              errors: [],
+              success: false,
+            },
+          }),
         },
       },
     },
-  } as unknown as Parameters<typeof SupabaseDialog>[0]["api"];
+  });
 
-  const logger = {
-    debug: async (message: string, extra?: Record<string, unknown>) => {
-      await api.client.app.log({ service: "opencode-supabase", level: "debug", message, extra });
+  await runAuthFlow({
+    api: api as never,
+    logger: createLogger(),
+    setState: (state) => {
+      states.push(state as unknown as Record<string, unknown>);
     },
-    info: async (message: string, extra?: Record<string, unknown>) => {
-      await api.client.app.log({ service: "opencode-supabase", level: "info", message, extra });
-    },
-    warn: async (message: string, extra?: Record<string, unknown>) => {
-      await api.client.app.log({ service: "opencode-supabase", level: "warn", message, extra });
-    },
-    error: async (message: string, extra?: Record<string, unknown>) => {
-      await api.client.app.log({ service: "opencode-supabase", level: "error", message, extra });
-    },
-  };
+  });
 
-  const dialog = SupabaseDialog({ api, logger, onClose: () => api.ui.dialog.clear() }) as {
-    onConfirm?: () => Promise<void>;
-  };
+  expect(api.__test.toasts).toEqual([]);
+  expect(api.__test.cleared).toBe(0);
+  expect(states.at(-1)).toEqual({
+    type: "error",
+    message: "broker returned an invalid response",
+    url: "https://example.com/auth",
+  });
 
-  await dialog.onConfirm?.();
+  const model = buildDialogModel({
+    type: "error",
+    message: "broker returned an invalid response",
+    url: "https://example.com/auth",
+  });
 
-  expect(toasts).toHaveLength(1);
-  expect(toasts[0]).toMatchObject({ variant: "success" });
-  expect(cleared).toBe(1);
-  expect(JSON.stringify(logMessages)).toContain("supabase auth chat write failed");
-  expect(JSON.stringify(logMessages)).toContain("chat write failed");
+  expect(model.url).toBe("https://example.com/auth");
+  expect(model.actions.map((action) => action.id)).toEqual(["retry", "open_browser", "close"]);
 });
 
-test("supabase dialog logs durable chat result errors without failing auth", async () => {
-  const toasts: Array<{ variant?: string; message: string }> = [];
-  const logMessages: Array<Record<string, unknown>> = [];
-  let cleared = 0;
-
-  const api = {
-    route: {
-      current: {
-        name: "session",
-        params: {
-          sessionID: "session-123",
-        },
-      },
-    },
-    ui: {
-      DialogAlert: (input: unknown) => input,
-      DialogConfirm: (input: unknown) => input,
-      toast: (input: { variant?: string; message: string }) => {
-        toasts.push(input);
-      },
-      dialog: {
-        clear: () => {
-          cleared += 1;
-        },
-      },
-    },
-    client: {
-      app: {
-        log: (input: Record<string, unknown>) => {
-          logMessages.push(input);
-          return Promise.resolve(true);
-        },
-      },
-      session: {
-        promptAsync: () => Promise.resolve({
-          error: {
-            message: "chat write failed via result",
-          },
-        }),
-      },
-      provider: {
-        oauth: {
-          authorize: () => Promise.resolve({ data: { url: "https://example.com/auth", instructions: "Test", method: "manual" } }),
-          callback: () => Promise.resolve({ data: true }),
-        },
-      },
-    },
-  } as unknown as Parameters<typeof SupabaseDialog>[0]["api"];
-
-  const logger = {
-    debug: async (message: string, extra?: Record<string, unknown>) => {
-      await api.client.app.log({ service: "opencode-supabase", level: "debug", message, extra });
-    },
-    info: async (message: string, extra?: Record<string, unknown>) => {
-      await api.client.app.log({ service: "opencode-supabase", level: "info", message, extra });
-    },
-    warn: async (message: string, extra?: Record<string, unknown>) => {
-      await api.client.app.log({ service: "opencode-supabase", level: "warn", message, extra });
-    },
-    error: async (message: string, extra?: Record<string, unknown>) => {
-      await api.client.app.log({ service: "opencode-supabase", level: "error", message, extra });
-    },
-  };
-
-  const dialog = SupabaseDialog({ api, logger, onClose: () => api.ui.dialog.clear() }) as {
-    onConfirm?: () => Promise<void>;
-  };
-
-  await dialog.onConfirm?.();
-
-  expect(toasts).toHaveLength(1);
-  expect(toasts[0]).toMatchObject({ variant: "success" });
-  expect(cleared).toBe(1);
-  expect(JSON.stringify(logMessages)).toContain("supabase auth chat write failed");
-  expect(JSON.stringify(logMessages)).toContain("chat write failed via result");
-});
-
-test("auth success html includes a concrete next step", () => {
+test("auth success html is minimal handoff copy", () => {
   expect(HTML_SUCCESS).toContain("Authorization Successful");
   expect(HTML_SUCCESS).toContain("You can <strong>close this window</strong> and return to OpenCode.");
-  expect(HTML_SUCCESS).toContain('Next, try asking OpenCode to <strong>"list my Supabase projects"</strong>.');
+  expect(HTML_SUCCESS).not.toContain("list my Supabase projects");
 });
 
 test("supabase dialog logs auth milestones without leaking oauth query values", async () => {
-  const appLog = [] as Array<Record<string, unknown>>;
-  let cleared = 0;
-
-  const api = {
-    ui: {
-      DialogAlert: (input: unknown) => input,
-      DialogConfirm: (input: unknown) => input,
-      toast: () => {},
-      dialog: {
-        clear: () => {
-          cleared += 1;
-        },
-      },
-    },
+  const logs: LogEntry[] = [];
+  const api = createDialogApi({
     client: {
       app: {
-        log: (input: Record<string, unknown>) => {
-          appLog.push(input);
-          return Promise.resolve(true);
-        },
+        log: (_input: unknown) => Promise.resolve(true),
+      },
+      tui: {
+        clearPrompt: () => Promise.resolve({ data: true }),
+        appendPrompt: (_input: unknown) => Promise.resolve({ data: true }),
+        submitPrompt: () => Promise.resolve({ data: true }),
+      },
+      session: {
+        promptAsync: () => Promise.resolve({ data: true }),
       },
       provider: {
         oauth: {
@@ -422,167 +409,16 @@ test("supabase dialog logs auth milestones without leaking oauth query values", 
         },
       },
     },
-  } as unknown as Parameters<typeof SupabaseDialog>[0]["api"];
+  });
 
-  const logger = {
-    debug: async (message: string, extra?: Record<string, unknown>) => {
-      await api.client.app.log({ service: "opencode-supabase", level: "debug", message, extra });
-    },
-    info: async (message: string, extra?: Record<string, unknown>) => {
-      await api.client.app.log({ service: "opencode-supabase", level: "info", message, extra });
-    },
-    warn: async (message: string, extra?: Record<string, unknown>) => {
-      await api.client.app.log({ service: "opencode-supabase", level: "warn", message, extra });
-    },
-    error: async (message: string, extra?: Record<string, unknown>) => {
-      await api.client.app.log({ service: "opencode-supabase", level: "error", message, extra });
-    },
-  };
+  await runAuthFlow({
+    api: api as never,
+    logger: createLogger(logs),
+    setState: () => {},
+  });
 
-  const dialog = SupabaseDialog({ api, logger, onClose: () => api.ui.dialog.clear() }) as {
-    onConfirm?: () => Promise<void>;
-  };
-
-  await dialog.onConfirm?.();
-
-  const serialized = JSON.stringify(appLog);
+  const serialized = JSON.stringify(logs);
   expect(serialized).toContain("supabase auth started");
   expect(serialized).toContain("supabase auth completed");
   expect(serialized).not.toContain("code=secret");
-  expect(cleared).toBe(1);
-});
-
-test("supabase dialog shows explicit callback port exhaustion toast", async () => {
-  const toasts: Array<{ variant?: string; message: string }> = [];
-  let cleared = 0;
-
-  const api = {
-    ui: {
-      DialogAlert: (input: unknown) => input,
-      DialogConfirm: (input: unknown) => input,
-      toast: (input: { variant?: string; message: string }) => {
-        toasts.push(input);
-      },
-      dialog: {
-        clear: () => {
-          cleared += 1;
-        },
-      },
-    },
-    client: {
-      app: {
-        log: (_input: unknown) => Promise.resolve(true),
-      },
-      provider: {
-        oauth: {
-          authorize: () => Promise.resolve({
-            error: {
-              data: {
-                name: "UnknownError",
-                data: {
-                  message: "Supabase callback ports busy: 14589, 14590, 14591. Close other OpenCode sessions and retry.",
-                },
-              },
-              errors: [],
-              success: false,
-            },
-          }),
-          callback: () => Promise.resolve({ data: true }),
-        },
-      },
-    },
-  } as unknown as Parameters<typeof SupabaseDialog>[0]["api"];
-
-  const logger = {
-    debug: () => Promise.resolve(),
-    info: () => Promise.resolve(),
-    warn: () => Promise.resolve(),
-    error: () => Promise.resolve(),
-  };
-
-  const dialog = SupabaseDialog({ api, logger, onClose: () => api.ui.dialog.clear() }) as {
-    onConfirm?: () => Promise<void>;
-  };
-
-  await dialog.onConfirm?.();
-
-  expect(toasts).toEqual([
-    {
-      variant: "error",
-      message:
-        "Supabase callback ports busy: 14589, 14590, 14591. Close other OpenCode sessions and retry.",
-    },
-  ]);
-  expect(cleared).toBe(1);
-});
-
-test("supabase dialog shows nested callback error from sdk payload", async () => {
-  const toasts: Array<{ variant?: string; message: string }> = [];
-  let cleared = 0;
-
-  const api = {
-    ui: {
-      DialogAlert: (input: unknown) => input,
-      DialogConfirm: (input: unknown) => input,
-      toast: (input: { variant?: string; message: string }) => {
-        toasts.push(input);
-      },
-      dialog: {
-        clear: () => {
-          cleared += 1;
-        },
-      },
-    },
-    client: {
-      app: {
-        log: (_input: unknown) => Promise.resolve(true),
-      },
-      provider: {
-        oauth: {
-          authorize: () =>
-            Promise.resolve({
-              data: {
-                url: "https://example.com/oauth",
-                instructions: "Open browser",
-                method: "auto",
-              },
-            }),
-          callback: () =>
-            Promise.resolve({
-              error: {
-                data: {
-                  name: "UnknownError",
-                  data: {
-                    message: "broker returned an invalid response",
-                  },
-                },
-                errors: [],
-                success: false,
-              },
-            }),
-        },
-      },
-    },
-  } as unknown as Parameters<typeof SupabaseDialog>[0]["api"];
-
-  const logger = {
-    debug: () => Promise.resolve(),
-    info: () => Promise.resolve(),
-    warn: () => Promise.resolve(),
-    error: () => Promise.resolve(),
-  };
-
-  const dialog = SupabaseDialog({ api, logger, onClose: () => api.ui.dialog.clear() }) as {
-    onConfirm?: () => Promise<void>;
-  };
-
-  await dialog.onConfirm?.();
-
-  expect(toasts).toEqual([
-    {
-      variant: "error",
-      message: "broker returned an invalid response",
-    },
-  ]);
-  expect(cleared).toBe(1);
 });

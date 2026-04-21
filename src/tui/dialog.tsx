@@ -1,4 +1,6 @@
 import type { TuiPluginApi } from "@opencode-ai/plugin/tui";
+import type { BaseRenderable } from "@opentui/core";
+import { createElement, insertNode, setProp } from "@opentui/solid";
 import { createSignal } from "solid-js";
 
 import { formatAuthError } from "../shared/auth-errors.ts";
@@ -8,6 +10,10 @@ type SupabaseDialogProps = {
   api: TuiPluginApi;
   onClose: () => void;
   logger: SupabaseLogger;
+  initialState?: OAuthState;
+  lifecycle?: {
+    closed: boolean;
+  };
 };
 
 type OAuthState =
@@ -15,9 +21,8 @@ type OAuthState =
   | { type: "authorizing"; url: string }
   | { type: "waiting_callback"; url: string }
   | { type: "success" }
-  | { type: "error"; message: string };
+  | { type: "error"; message: string; url?: string };
 
-// API response types
 type ApiResponse<T> = { data?: T; error?: unknown };
 
 type AuthData = {
@@ -26,181 +31,450 @@ type AuthData = {
   method: string;
 };
 
-type SessionPromptResult = { data?: unknown; error?: unknown };
+type DialogActionID = "connect" | "cancel" | "open_browser" | "list_projects" | "close" | "retry";
 
-const AUTH_SUCCESS_CHAT_MESSAGE = `Supabase connected. Tools are ready.
+type DialogModel = {
+  title: string;
+  message: string;
+  url?: string;
+  status?: {
+    label: string;
+    tone: "warning" | "success" | "error";
+  };
+  actions: Array<{
+    id: DialogActionID;
+    label: string;
+    description: string;
+  }>;
+};
 
-Try asking:
-- list my Supabase organizations
-- list my Supabase projects
-- for organization <org-slug>, list available Supabase regions`;
+type DialogModelOptions = {
+  canSubmitPrompt?: boolean;
+};
 
-function activeSessionID(api: TuiPluginApi) {
-  const current = api.route.current;
-  if (current.name !== "session") {
-    return undefined;
+type DialogActionContext = {
+  api: TuiPluginApi;
+  logger: SupabaseLogger;
+  onClose: () => void;
+  startOAuth: () => Promise<void>;
+  getState: () => OAuthState;
+};
+
+type AuthFlowContext = {
+  api: TuiPluginApi;
+  logger: SupabaseLogger;
+  setState: (state: OAuthState) => void;
+};
+
+function getErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function toneColor(tone: NonNullable<DialogModel["status"]>["tone"]) {
+  if (tone === "success") {
+    return "#3ECF8E";
   }
 
-  const { sessionID } = current.params ?? {};
-  return typeof sessionID === "string" ? sessionID : undefined;
+  if (tone === "error") {
+    return "#ef4444";
+  }
+
+  return "#facc15";
+}
+
+function renderable(tag: string, props: Record<string, unknown>, children: BaseRenderable[] = []) {
+  const node = createElement(tag);
+
+  for (const [key, value] of Object.entries(props)) {
+    setProp(node, key, value);
+  }
+
+  for (const child of children) {
+    insertNode(node, child);
+  }
+
+  return node;
+}
+
+function text(content: string, props: Record<string, unknown> = {}) {
+  return renderable("text", { ...props, content });
+}
+
+async function ensureResultOk(result: { error?: unknown } | undefined) {
+  if (result?.error) {
+    throw new Error(formatAuthError("unknown", result.error));
+  }
+}
+
+async function openBrowser(url: string, logger: SupabaseLogger) {
+  try {
+    const open = await import("open");
+    await open.default(url);
+  } catch (error) {
+    await logger.warn("supabase browser open failed", {
+      message: getErrorMessage(error),
+    });
+  }
+}
+
+function canSubmitPrompt(api: TuiPluginApi) {
+  const current = api.route.current;
+  return current.name === "home" || current.name === "session";
+}
+
+export function buildDialogModel(state: OAuthState, options: DialogModelOptions = {}): DialogModel {
+  const canRunPrompt = options.canSubmitPrompt ?? true;
+
+  switch (state.type) {
+    case "idle":
+      return {
+        title: "Connect Supabase",
+        message: "Authorize OpenCode to access your Supabase account.",
+        actions: [
+          {
+            id: "connect",
+            label: "Connect Supabase",
+            description: "Open the Supabase authorization flow.",
+          },
+          {
+            id: "cancel",
+            label: "Cancel",
+            description: "Dismiss this dialog.",
+          },
+        ],
+      };
+    case "authorizing":
+      return {
+        title: "Connect Supabase",
+        status: {
+          label: "Authorizing",
+          tone: "warning",
+        },
+        message: state.url
+          ? "Opening your browser. If it does not open automatically, use the full URL below."
+          : "Starting authorization...",
+        url: state.url || undefined,
+        actions: state.url
+          ? [
+              {
+                id: "open_browser",
+                label: "Open Browser Again",
+                description: "Try opening the saved authorization URL again.",
+              },
+              {
+                id: "cancel",
+                label: "Cancel",
+                description: "Dismiss this dialog.",
+              },
+            ]
+          : [
+              {
+                id: "cancel",
+                label: "Cancel",
+                description: "Dismiss this dialog.",
+              },
+            ],
+      };
+    case "waiting_callback":
+      return {
+        title: "Connect Supabase",
+        status: {
+          label: "Authorizing",
+          tone: "warning",
+        },
+        message: "Finish authorization in your browser. If needed, use the full URL below.",
+        url: state.url,
+        actions: [
+          {
+            id: "open_browser",
+            label: "Open Browser Again",
+            description: "Try opening the saved authorization URL again.",
+          },
+          {
+            id: "cancel",
+            label: "Cancel",
+            description: "Dismiss this dialog.",
+          },
+        ],
+      };
+    case "success":
+      return {
+        title: "Connect Supabase",
+        status: {
+          label: "Connected",
+          tone: "success",
+        },
+        message: canRunPrompt
+          ? "Supabase is connected. Run a concrete example now or close this dialog."
+          : "Supabase is connected. Return to a chat or home prompt to try example commands.",
+        actions: canRunPrompt
+          ? [
+              {
+                id: "list_projects",
+                label: "List my Supabase projects",
+                description: "Replace the current prompt with a project-listing command and run it.",
+              },
+              {
+                id: "close",
+                label: "Close",
+                description: "Dismiss this dialog without running anything.",
+              },
+            ]
+          : [
+              {
+                id: "close",
+                label: "Close",
+                description: "Dismiss this dialog.",
+              },
+            ],
+      };
+    case "error":
+      return {
+        title: "Connect Supabase",
+        status: {
+          label: "Authorization Failed",
+          tone: "error",
+        },
+        message: state.message,
+        url: state.url,
+        actions: [
+          {
+            id: "retry",
+            label: "Retry",
+            description: "Restart Supabase authorization.",
+          },
+          ...(state.url
+            ? [
+                {
+                  id: "open_browser" as const,
+                  label: "Open Browser Again",
+                  description: "Try reopening the saved authorization URL.",
+                },
+              ]
+            : []),
+          {
+            id: "close",
+            label: "Close",
+            description: "Dismiss this dialog.",
+          },
+        ],
+      };
+  }
+}
+
+export async function runDialogAction(action: DialogActionID, context: DialogActionContext) {
+  if (action === "cancel" || action === "close") {
+    context.onClose();
+    return;
+  }
+
+  if (action === "connect" || action === "retry") {
+    await context.startOAuth();
+    return;
+  }
+
+  if (action === "open_browser") {
+    const currentState = context.getState();
+    if (currentState.type === "authorizing" || currentState.type === "waiting_callback") {
+      await openBrowser(currentState.url, context.logger);
+    }
+
+    if (currentState.type === "error" && currentState.url) {
+      await openBrowser(currentState.url, context.logger);
+    }
+    return;
+  }
+
+  if (!canSubmitPrompt(context.api)) {
+    throw new Error("Suggested prompt unavailable from this screen");
+  }
+
+  const clearResult = (await context.api.client.tui.clearPrompt()) as { error?: unknown };
+  await ensureResultOk(clearResult);
+
+  const appendResult = (await context.api.client.tui.appendPrompt({
+    text: "list my Supabase projects",
+  })) as { error?: unknown };
+  await ensureResultOk(appendResult);
+
+  const submitResult = (await context.api.client.tui.submitPrompt()) as { error?: unknown };
+  await ensureResultOk(submitResult);
+  context.onClose();
+}
+
+export async function runAuthFlow(context: AuthFlowContext) {
+  let authURL: string | undefined;
+
+  try {
+    await context.logger.info("supabase auth started", {
+      phase: "authorize",
+    });
+    context.setState({ type: "authorizing", url: "" });
+
+    const authResponse = (await context.api.client.provider.oauth.authorize({
+      providerID: "supabase",
+      method: 0,
+    })) as ApiResponse<AuthData>;
+
+    if (authResponse.error) {
+      throw new Error(formatAuthError("start", authResponse.error));
+    }
+
+    const authData = authResponse.data;
+    if (!authData?.url) {
+      throw new Error("Invalid OAuth authorization response");
+    }
+
+    const { url, method } = authData;
+    authURL = url;
+    const safeUrl = new URL(url);
+    context.setState({ type: "authorizing", url });
+
+    await context.logger.debug("supabase auth authorize response received", {
+      method,
+      url_origin: safeUrl.origin,
+      url_path: safeUrl.pathname,
+    });
+
+    if (method === "auto") {
+      await openBrowser(url, context.logger);
+    }
+
+    context.setState({ type: "waiting_callback", url });
+    await context.logger.debug("supabase auth waiting for callback");
+
+    const callbackResponse = (await context.api.client.provider.oauth.callback({
+      providerID: "supabase",
+      method: 0,
+    })) as ApiResponse<boolean>;
+
+    if (callbackResponse.error) {
+      throw new Error(formatAuthError("callback", callbackResponse.error));
+    }
+
+    if (callbackResponse.data !== true) {
+      throw new Error("OAuth authorization was denied");
+    }
+
+    await context.logger.info("supabase auth completed", {
+      status: "success",
+    });
+    context.setState({ type: "success" });
+  } catch (error) {
+    const message = formatAuthError("unknown", error);
+    await context.logger.error("supabase auth failed", {
+      message,
+    });
+    context.setState({ type: "error", message, url: authURL });
+  }
 }
 
 export function SupabaseDialog(props: SupabaseDialogProps) {
-  const [state, setState] = createSignal<OAuthState>({ type: "idle" });
+  const lifecycle = props.lifecycle ?? { closed: false };
+  const [state, setStateSignal] = createSignal<OAuthState>(props.initialState ?? { type: "idle" });
 
-  const startOAuth = async () => {
+  const closeDialog = () => {
+    lifecycle.closed = true;
+    props.onClose();
+  };
+
+  const setState = (nextState: OAuthState) => {
+    if (lifecycle.closed) {
+      return;
+    }
+
+    setStateSignal(nextState);
+    props.api.ui.dialog.replace(() =>
+      SupabaseDialog({
+        ...props,
+        initialState: nextState,
+        lifecycle,
+      }),
+    );
+  };
+
+  const startOAuth = () => runAuthFlow({ api: props.api, logger: props.logger, setState });
+
+  const handleAction = async (action: DialogActionID) => {
     try {
-      await props.logger.info("supabase auth started", {
-        phase: "authorize",
+      await runDialogAction(action, {
+        api: props.api,
+        logger: props.logger,
+        onClose: closeDialog,
+        startOAuth,
+        getState: state,
       });
-      setState({ type: "authorizing", url: "" });
-
-      // Start OAuth authorization
-      const authResponse = (await props.api.client.provider.oauth.authorize({
-        providerID: "supabase",
-        method: 0,
-      })) as unknown as ApiResponse<AuthData>;
-
-      // Handle the response shape from the plugin API
-      if (authResponse.error) {
-        throw new Error(formatAuthError("start", authResponse.error));
-      }
-
-      const authData = authResponse.data;
-
-      if (!authData?.url) {
-        throw new Error("Invalid OAuth authorization response");
-      }
-
-      const { url, method } = authData;
-      const safeUrl = new URL(url);
-      setState({ type: "authorizing", url });
-
-      await props.logger.debug("supabase auth authorize response received", {
-        method,
-        url_origin: safeUrl.origin,
-        url_path: safeUrl.pathname,
-      });
-
-      // Attempt to open browser automatically
-      if (method === "auto") {
-        try {
-          const open = await import("open");
-          await open.default(url);
-        } catch {
-          await props.logger.warn("supabase browser open failed");
-          // Browser auto-open failed, user can click the URL manually
-        }
-      }
-
-      setState({ type: "waiting_callback", url });
-      await props.logger.debug("supabase auth waiting for callback");
-
-      // Wait for callback
-      const callbackResponse = (await props.api.client.provider.oauth.callback({
-        providerID: "supabase",
-        method: 0,
-      })) as unknown as ApiResponse<boolean>;
-
-      if (callbackResponse.error) {
-        throw new Error(formatAuthError("callback", callbackResponse.error));
-      }
-
-      const callbackSucceeded = callbackResponse.data === true;
-
-      if (callbackSucceeded) {
-        await props.logger.info("supabase auth completed", {
-          status: "success",
-        });
-        setState({ type: "success" });
-        const sessionID = activeSessionID(props.api);
-        if (sessionID) {
-          try {
-            const promptResult = (await props.api.client.session.promptAsync({
-              sessionID,
-              noReply: true,
-              parts: [
-                {
-                  type: "text",
-                  text: AUTH_SUCCESS_CHAT_MESSAGE,
-                },
-              ],
-            })) as SessionPromptResult;
-
-            if (promptResult.error) {
-              throw new Error(formatAuthError("unknown", promptResult.error));
-            }
-          } catch (error) {
-            await props.logger.warn("supabase auth chat write failed", {
-              message: error instanceof Error ? error.message : String(error),
-            });
-          }
-        }
-        props.api.ui.toast({
-          variant: "success",
-          message:
-            "Connected to Supabase! Tools are ready to use. Ask your agent about supabase.",
-        });
-        props.onClose();
-      } else {
-        throw new Error("OAuth authorization was denied");
-      }
     } catch (error) {
-      const message = formatAuthError("unknown", error);
-      await props.logger.error("supabase auth failed", {
-        message,
+      await props.logger.error("supabase dialog action failed", {
+        action,
+        message: getErrorMessage(error),
       });
-      setState({ type: "error", message });
       props.api.ui.toast({
         variant: "error",
-        message,
+        message: getErrorMessage(error),
       });
-      props.onClose();
     }
   };
 
-  const currentState = state();
+  const model = buildDialogModel(state(), {
+    canSubmitPrompt: canSubmitPrompt(props.api),
+  });
 
-  if (currentState.type === "idle") {
-    return props.api.ui.DialogConfirm({
-      title: "Connect Supabase",
-      message:
-        "This will open a browser window to authorize OpenCode to access your Supabase account. Continue?",
-      onConfirm: startOAuth,
-      onCancel: props.onClose,
-    });
+  const children: BaseRenderable[] = [text(model.title)];
+
+  if (model.status) {
+    children.push(
+      renderable(
+        "box",
+        {
+          border: true,
+          borderColor: toneColor(model.status.tone),
+          paddingX: 1,
+          paddingY: 0,
+        },
+        [text(model.status.label, { fg: toneColor(model.status.tone) })],
+      ),
+    );
   }
 
-  if (currentState.type === "authorizing") {
-    return props.api.ui.DialogAlert({
-      title: "Connect Supabase",
-      message: currentState.url
-        ? `Opening browser to authorize Supabase...\n\nIf the browser doesn't open automatically, visit:\n${currentState.url}`
-        : "Starting authorization...",
-      onConfirm: props.onClose,
-    });
+  children.push(text(model.message));
+
+  if (model.url) {
+    children.push(
+      renderable(
+        "box",
+        {
+          border: true,
+          borderColor: "#444444",
+          padding: 1,
+        },
+        [renderable("scrollbox", { height: 3 }, [text(model.url)])],
+      ),
+    );
   }
 
-  if (currentState.type === "waiting_callback") {
-    return props.api.ui.DialogAlert({
-      title: "Connect Supabase",
-      message: `Waiting for authorization in your browser...\n\nIf you need to complete authorization manually, visit:\n${currentState.url}`,
-      onConfirm: props.onClose,
-    });
-  }
+  children.push(
+    renderable("tab_select", {
+      focused: true,
+      showDescription: true,
+      options: model.actions.map((action) => ({
+        name: action.label,
+        description: action.description,
+        value: action.id,
+      })),
+      onSelect: (_index: number, option: { value?: string } | null) => {
+        if (!option?.value) {
+          return;
+        }
 
-  if (currentState.type === "error") {
-    return props.api.ui.DialogAlert({
-      title: "Authorization Failed",
-      message: currentState.message,
-      onConfirm: props.onClose,
-    });
-  }
+        void handleAction(option.value as DialogActionID);
+      },
+    }),
+  );
 
-  // Success state (should close immediately via onClose)
-  return props.api.ui.DialogAlert({
-    title: "Connected",
-    message: "Successfully connected to Supabase.",
-    onConfirm: props.onClose,
+  return props.api.ui.Dialog({
+    size: "large",
+    onClose: closeDialog,
+    children: renderable("box", { flexDirection: "column", gap: 1, padding: 1 }, children),
   });
 }
