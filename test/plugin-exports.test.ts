@@ -258,39 +258,7 @@ test("supabase dialog success is silent when waiting dialog was dismissed", asyn
 
 test("supabase dialog success shows example prompts and inserts on confirm", async () => {
   const states: Array<Record<string, unknown>> = [];
-  let promptCalls = 0;
-  const api = createDialogApi({
-    route: {
-      current: {
-        name: "session",
-        params: {
-          sessionID: "session-123",
-        },
-      },
-    },
-    client: {
-      app: {
-        log: (_input: unknown) => Promise.resolve(true),
-      },
-      tui: {
-        clearPrompt: () => Promise.resolve({ data: true }),
-        appendPrompt: (input: unknown) => {
-          promptCalls += 1;
-          return Promise.resolve({ data: true });
-        },
-        submitPrompt: () => Promise.resolve({ data: true }),
-      },
-      session: {
-        promptAsync: () => Promise.resolve({ data: true }),
-      },
-      provider: {
-        oauth: {
-          authorize: () => Promise.resolve({ data: { url: "https://example.com/auth", instructions: "Test", method: "manual" } }),
-          callback: () => Promise.resolve({ data: true }),
-        },
-      },
-    },
-  });
+  const api = createDialogApi();
 
   await runAuthFlow({
     api: api as never,
@@ -301,20 +269,26 @@ test("supabase dialog success shows example prompts and inserts on confirm", asy
     },
   });
 
-  // After success state, dialog should show with example prompts
   const successDialog = SupabaseDialog({
     api: api as never,
     logger: createLogger(),
     onClose: () => api.ui.dialog.clear(),
     initialState: { type: "success" },
-  });
+  }) as { title?: string; onConfirm?: () => Promise<void> };
 
-  expect(successDialog).toMatchObject({
-    title: "Connected to Supabase",
-  });
-  expect(api.__test.dialogConfirms).toHaveLength(1);
+  expect(successDialog.title).toBe("Connected to Supabase");
+
+  await successDialog.onConfirm?.();
+
+  expect(api.__test.promptOps).toEqual([
+    {
+      op: "appendPrompt",
+      payload: { text: "list my Supabase projects" },
+    },
+  ]);
+  expect(api.__test.promptOps.some((op) => op.op === "submitPrompt")).toBe(false);
+  expect(api.__test.cleared).toBe(1);
   expect(api.__test.toasts).toEqual([]);
-  expect(api.__test.promptOps).toEqual([]);
   expect(states.at(-1)).toEqual({ type: "success" });
 });
 
@@ -408,6 +382,61 @@ test("supabase dialog error uses simple built in retry dialog", () => {
   });
   expect(api.__test.dialogConfirms).toHaveLength(1);
   expect(api.__test.dialogs).toHaveLength(0);
+});
+
+test("error retry starts fresh oauth without using stale url", async () => {
+  let authorizeCalls = 0;
+  let callbackCalls = 0;
+
+  const api = createDialogApi({
+    client: {
+      app: {
+        log: (_input: unknown) => Promise.resolve(true),
+      },
+      tui: {
+        clearPrompt: () => Promise.resolve({ data: true }),
+        appendPrompt: (_input: unknown) => Promise.resolve({ data: true }),
+        submitPrompt: () => Promise.resolve({ data: true }),
+      },
+      session: {
+        promptAsync: () => Promise.resolve({ data: true }),
+      },
+      provider: {
+        oauth: {
+          authorize: () => {
+            authorizeCalls += 1;
+            return Promise.resolve({
+              data: {
+                url: "https://example.com/fresh",
+                instructions: "Test",
+                method: "manual",
+              },
+            });
+          },
+          callback: () => {
+            callbackCalls += 1;
+            return Promise.resolve({ data: true });
+          },
+        },
+      },
+    },
+  });
+
+  const dialog = SupabaseDialog({
+    api: api as never,
+    logger: createLogger(),
+    onClose: () => api.ui.dialog.clear(),
+    initialState: {
+      type: "error",
+      message: "bad auth",
+      url: "https://example.com/stale",
+    },
+  }) as { onConfirm?: () => Promise<void> };
+
+  await dialog.onConfirm?.();
+
+  expect(authorizeCalls).toBe(1);
+  expect(callbackCalls).toBe(1);
 });
 
 test("supabase dialog error preserves url for retry messaging", async () => {
