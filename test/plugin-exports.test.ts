@@ -3,7 +3,7 @@ import { expect, test } from "bun:test";
 import { HTML_SUCCESS } from "../src/server/auth-html.ts";
 import serverModule from "../src/server/index.ts";
 import { createSupabaseCommand } from "../src/tui/commands.ts";
-import { SupabaseDialog, runAuthFlow } from "../src/tui/dialog.tsx";
+import { SupabaseDialog, runAuthFlow, runAuthPreflight } from "../src/tui/dialog.tsx";
 import tuiModule from "../src/tui/index.tsx";
 
 type LogEntry = Record<string, unknown>;
@@ -292,12 +292,206 @@ test("supabase dialog success shows example prompts and inserts on confirm", asy
   expect(states.at(-1)).toEqual({ type: "success" });
 });
 
+test("supabase auth preflight reports already connected when saved auth is still valid", async () => {
+  const states: Array<Record<string, unknown>> = [];
+  const api = createDialogApi({
+    client: {
+      app: {
+        log: (_input: unknown) => Promise.resolve(true),
+      },
+      tui: {
+        clearPrompt: () => Promise.resolve({ data: true }),
+        appendPrompt: (_input: unknown) => Promise.resolve({ data: true }),
+        submitPrompt: () => Promise.resolve({ data: true }),
+      },
+      session: {
+        promptAsync: () => Promise.resolve({ data: true }),
+      },
+      provider: {
+        oauth: {
+          authorize: ({ method }: { method?: number }) => {
+            if (method === 1) {
+              return Promise.resolve({
+                data: {
+                  url: "https://supabase.com/",
+                  instructions: JSON.stringify({ status: "connected", checked: false }),
+                  method: "code",
+                },
+              });
+            }
+            return Promise.resolve({ data: { url: "https://example.com/auth", instructions: "Test", method: "manual" } });
+          },
+          callback: () => Promise.resolve({ data: true }),
+        },
+      },
+    },
+  });
+
+  await runAuthPreflight({
+    api: api as never,
+    logger: createLogger(),
+    setState: (state) => {
+      states.push(state as unknown as Record<string, unknown>);
+    },
+  });
+
+  expect(states).toEqual([{ type: "checking_auth" }, { type: "already_connected" }]);
+});
+
+test("supabase auth preflight shows unknown state when refresh verification fails", async () => {
+  const states: Array<Record<string, unknown>> = [];
+  const api = createDialogApi({
+    client: {
+      app: {
+        log: (_input: unknown) => Promise.resolve(true),
+      },
+      tui: {
+        clearPrompt: () => Promise.resolve({ data: true }),
+        appendPrompt: (_input: unknown) => Promise.resolve({ data: true }),
+        submitPrompt: () => Promise.resolve({ data: true }),
+      },
+      session: {
+        promptAsync: () => Promise.resolve({ data: true }),
+      },
+      provider: {
+        oauth: {
+          authorize: ({ method }: { method?: number }) => {
+            if (method === 1) {
+              return Promise.resolve({
+                data: {
+                  url: "https://supabase.com/",
+                  instructions: JSON.stringify({ status: "refresh_required", checked: true }),
+                  method: "auto",
+                },
+              });
+            }
+            return Promise.resolve({ data: { url: "https://example.com/auth", instructions: "Test", method: "manual" } });
+          },
+          callback: ({ method }: { method?: number }) => {
+            if (method === 1) {
+              return Promise.resolve({
+                error: {
+                  data: {
+                    name: "UnknownError",
+                    data: {
+                      message: "Supabase auth refresh failed: broker unavailable",
+                    },
+                  },
+                  errors: [],
+                  success: false,
+                },
+              });
+            }
+            return Promise.resolve({ data: true });
+          },
+        },
+      },
+    },
+  });
+
+  await runAuthPreflight({
+    api: api as never,
+    logger: createLogger(),
+    setState: (state) => {
+      states.push(state as unknown as Record<string, unknown>);
+    },
+  });
+
+  expect(states).toEqual([
+    { type: "checking_auth" },
+    {
+      type: "unknown",
+      message: "Supabase auth refresh failed: broker unavailable",
+    },
+  ]);
+});
+
+test("supabase dialog already connected offers disconnect action", async () => {
+  const authorizeCalls: Array<{ providerID?: string; method?: number; inputs?: Record<string, string> }> = [];
+  const api = createDialogApi({
+    client: {
+      app: {
+        log: (_input: unknown) => Promise.resolve(true),
+      },
+      tui: {
+        clearPrompt: () => Promise.resolve({ data: true }),
+        appendPrompt: (_input: unknown) => Promise.resolve({ data: true }),
+        submitPrompt: () => Promise.resolve({ data: true }),
+      },
+      session: {
+        promptAsync: () => Promise.resolve({ data: true }),
+      },
+      provider: {
+        oauth: {
+          authorize: (input: { method?: number; inputs?: Record<string, string> }) => {
+            authorizeCalls.push(input);
+            return Promise.resolve({
+              data: {
+                url: "https://supabase.com/",
+                instructions: JSON.stringify({ status: "disconnected", checked: false }),
+                method: "code",
+              },
+            });
+          },
+          callback: () => Promise.resolve({ data: true }),
+        },
+      },
+    },
+  });
+
+  const dialog = SupabaseDialog({
+    api: api as never,
+    logger: createLogger(),
+    onClose: () => api.ui.dialog.clear(),
+    initialState: { type: "already_connected" },
+  }) as { title?: string; message?: string; onCancel?: () => Promise<void> };
+
+  expect(dialog.title).toBe("Already connected to Supabase");
+  await dialog.onCancel?.();
+
+  expect(authorizeCalls).toEqual([{ providerID: "supabase", method: 1, inputs: { action: "disconnect" } }]);
+  expect(api.__test.cleared).toBe(1);
+});
+
+test("supabase dialog unknown state offers retry and continue", async () => {
+  const api = createDialogApi();
+  const dialog = SupabaseDialog({
+    api: api as never,
+    logger: createLogger(),
+    onClose: () => api.ui.dialog.clear(),
+    initialState: {
+      type: "unknown",
+      message: "Saved Supabase login found, but couldn't verify it right now.",
+    },
+  }) as { title?: string; onConfirm?: () => Promise<void>; onCancel?: () => void };
+
+  expect(dialog.title).toBe("Supabase connection status unknown");
+  expect(typeof dialog.onConfirm).toBe("function");
+  expect(typeof dialog.onCancel).toBe("function");
+});
+
+test("supabase dialog starts with built in checking alert", () => {
+  const api = createDialogApi();
+  const dialog = SupabaseDialog({
+    api: api as never,
+    logger: createLogger(),
+    onClose: () => api.ui.dialog.clear(),
+  });
+
+  expect(dialog).toMatchObject({
+    title: "Connect Supabase",
+  });
+  expect(api.__test.dialogAlerts).toHaveLength(1);
+  expect(api.__test.dialogs).toHaveLength(0);
+});
+
 test("supabase dialog idle uses built in confirm dialog", () => {
   const api = createDialogApi();
   const dialog = SupabaseDialog({
     api: api as never,
     logger: createLogger(),
     onClose: () => api.ui.dialog.clear(),
+    initialState: { type: "idle" },
   });
 
   expect(dialog).toMatchObject({

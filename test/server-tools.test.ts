@@ -8,7 +8,9 @@ import { readSavedAuth, writeSavedAuth } from "../src/server/store.ts";
 import {
   type SupabaseToolInput,
   createSupabaseTools,
+  disconnectSupabaseAuth,
   ensureSupabaseToolAuth,
+  getSupabaseAuthStatus,
 } from "../src/server/tools.ts";
 import { createSupabaseLogger } from "../src/shared/log.ts";
 import type { FetchLike } from "../src/shared/types.ts";
@@ -230,6 +232,92 @@ describe("server tools auth helper", () => {
     await tools.supabase_list_projects.execute({}, createContext(input));
 
     expect(hostAuthSet).toHaveBeenCalledTimes(1);
+  });
+
+  test("reports connected when saved auth is still fresh", async () => {
+    const { input } = await createInput();
+    await writeSavedAuth(input, {
+      access: "saved-access",
+      refresh: "saved-refresh",
+      expires: Date.now() + 60_000,
+    });
+
+    await expect(getSupabaseAuthStatus(input)).resolves.toEqual({
+      status: "connected",
+      auth: {
+        access: "saved-access",
+        refresh: "saved-refresh",
+        expires: expect.any(Number),
+      },
+      checked: false,
+    });
+  });
+
+  test("reports disconnected when no saved auth exists", async () => {
+    const { input } = await createInput();
+
+    await expect(getSupabaseAuthStatus(input)).resolves.toEqual({
+      status: "disconnected",
+      checked: false,
+    });
+  });
+
+  test("reports unknown when refresh fails for broker availability reasons", async () => {
+    const { input } = await createInput();
+    process.env.OPENCODE_SUPABASE_BROKER_URL = "https://example.com/broker";
+    await writeSavedAuth(input, {
+      access: "expired-access",
+      refresh: "saved-refresh",
+      expires: Date.now() - 1_000,
+    });
+
+    const fetchMock: FetchLike = mock(async (request) => {
+      const url = String(request);
+      if (url === "https://example.com/broker/refresh") {
+        return new Response(
+          JSON.stringify({
+            error: {
+              code: "broker_unavailable",
+              message: "broker unavailable",
+            },
+          }),
+          { status: 502, headers: { "Content-Type": "application/json" } },
+        );
+      }
+
+      throw new Error(`unexpected url: ${url}`);
+    });
+
+    await expect(getSupabaseAuthStatus(input, undefined, { fetch: fetchMock })).resolves.toEqual({
+      status: "unknown",
+      checked: true,
+      message: "Supabase auth refresh failed: broker unavailable",
+    });
+  });
+
+  test("disconnect helper clears saved auth and host auth", async () => {
+    const { input } = await createInput();
+    await writeSavedAuth(input, {
+      access: "saved-access",
+      refresh: "saved-refresh",
+      expires: Date.now() + 60_000,
+    });
+
+    const fetchMock: FetchLike = mock(async (request) => {
+      const url = String(request);
+      if (url === `http://127.0.0.1:7777/auth/supabase?directory=${encodeURIComponent(input.directory)}`) {
+        return new Response(JSON.stringify(true), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      throw new Error(`unexpected url: ${url}`);
+    });
+
+    await disconnectSupabaseAuth(input, { fetch: fetchMock });
+
+    await expect(readSavedAuth(input)).resolves.toEqual({ version: 1 });
   });
 
   test("clears saved auth and host auth when refresh is unauthorized", async () => {

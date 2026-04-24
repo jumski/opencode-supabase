@@ -44,7 +44,23 @@ type SupabaseToolContext = Pick<
   "directory" | "worktree" | "abort" | "sessionID" | "messageID" | "agent" | "metadata" | "ask"
 >;
 
-const NOT_CONNECTED_MESSAGE = "Supabase is not connected. Run /supabase first.";
+export type SupabaseAuthStatus =
+  | {
+      status: "connected";
+      auth: SavedAuth;
+      checked: boolean;
+    }
+  | {
+      status: "disconnected";
+      checked: boolean;
+    }
+  | {
+      status: "unknown";
+      checked: true;
+      message: string;
+    };
+
+export const NOT_CONNECTED_MESSAGE = "Supabase is not connected. Run /supabase first.";
 const REFRESH_BUFFER_MS = 30_000;
 
 function isRefreshNeeded(auth: SavedAuth) {
@@ -166,6 +182,44 @@ async function clearHostAuth(
   const response = await fetchImpl(url.toString(), { method: "DELETE" });
   if (!response.ok) {
     throw new Error(`Failed to clear host auth: ${response.status}`);
+  }
+}
+
+export async function disconnectSupabaseAuth(
+  input: SupabaseToolInput,
+  deps: Pick<ToolDeps, "fetch"> = {},
+) {
+  const fetchImpl = deps.fetch ?? fetch;
+  await clearSavedAuth(input);
+  try {
+    await clearHostAuth(input, fetchImpl);
+  } catch {}
+}
+
+export async function getSupabaseAuthStatus(
+  input: SupabaseToolInput,
+  options?: PluginOptions,
+  deps: ToolDeps = {},
+): Promise<SupabaseAuthStatus> {
+  const saved = await readSavedAuth(input);
+  if (!saved.auth) {
+    return { status: "disconnected", checked: false };
+  }
+
+  if (!isRefreshNeeded(saved.auth)) {
+    return { status: "connected", auth: saved.auth, checked: false };
+  }
+
+  try {
+    const auth = await ensureSupabaseToolAuth(input, options, deps);
+    return { status: "connected", auth, checked: true };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message === NOT_CONNECTED_MESSAGE) {
+      return { status: "disconnected", checked: true };
+    }
+
+    return { status: "unknown", checked: true, message };
   }
 }
 
