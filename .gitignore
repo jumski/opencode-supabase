@@ -36,3 +36,6 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 .mise.toml
 supabase/.branches
 supabase/.temp/
+
+# git worktrees
+.worktrees/
