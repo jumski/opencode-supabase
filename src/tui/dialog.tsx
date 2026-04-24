@@ -12,6 +12,7 @@ type SupabaseDialogProps = {
   lifecycle?: {
     closed: boolean;
     dismissed?: boolean;
+    preflightPromise?: Promise<void>;
   };
 };
 
@@ -258,12 +259,21 @@ export function SupabaseDialog(props: SupabaseDialogProps) {
       },
     });
 
-  const retryPreflight = () =>
-    runAuthPreflight({
+  const retryPreflight = () => {
+    if (lifecycle.preflightPromise) {
+      return lifecycle.preflightPromise;
+    }
+
+    lifecycle.preflightPromise = runAuthPreflight({
       api: props.api,
       logger: props.logger,
       setState,
+    }).finally(() => {
+      lifecycle.preflightPromise = undefined;
     });
+
+    return lifecycle.preflightPromise;
+  };
 
   const disconnect = async () => {
     try {
@@ -272,19 +282,23 @@ export function SupabaseDialog(props: SupabaseDialogProps) {
         method: 1,
         inputs: { action: "disconnect" },
       });
+      closeDialog();
     } catch (error) {
       await props.logger.warn("supabase disconnect failed", {
         message: getErrorMessage(error),
       });
+      setState({
+        type: "unknown",
+        message: `Couldn't disconnect from Supabase right now. ${formatAuthError("unknown", error)}`,
+      });
     }
-    closeDialog();
   };
 
   const currentState = state();
 
   if (currentState.type === "checking_auth") {
     queueMicrotask(() => {
-      if (lifecycle.closed) {
+      if (lifecycle.closed || lifecycle.preflightPromise) {
         return;
       }
       void retryPreflight();

@@ -453,6 +453,127 @@ test("supabase dialog already connected offers disconnect action", async () => {
   expect(api.__test.cleared).toBe(1);
 });
 
+test("supabase dialog starts preflight only once while first check is pending", async () => {
+  let authorizeCalls = 0;
+  let currentDialog: unknown;
+
+  const api = createDialogApi({
+    ui: {
+      Dialog: (input: unknown) => input,
+      DialogAlert: (input: unknown) => input,
+      DialogConfirm: (input: unknown) => input,
+      toast: (_input: { variant?: string; message: string }) => undefined,
+      dialog: {
+        replace: (factory: () => unknown) => {
+          currentDialog = factory();
+        },
+        clear: () => undefined,
+      },
+    },
+    client: {
+      app: {
+        log: (_input: unknown) => Promise.resolve(true),
+      },
+      tui: {
+        clearPrompt: () => Promise.resolve({ data: true }),
+        appendPrompt: (_input: unknown) => Promise.resolve({ data: true }),
+        submitPrompt: () => Promise.resolve({ data: true }),
+      },
+      session: {
+        promptAsync: () => Promise.resolve({ data: true }),
+      },
+      provider: {
+        oauth: {
+          authorize: ({ method }: { method?: number }) => {
+            if (method === 1) {
+              authorizeCalls += 1;
+              if (authorizeCalls > 1) {
+                return Promise.reject(new Error("duplicate preflight"));
+              }
+              return Promise.resolve({
+                data: {
+                  url: "https://supabase.com/",
+                  instructions: JSON.stringify({ status: "connected", checked: false }),
+                  method: "code",
+                },
+              });
+            }
+            return Promise.resolve({ data: { url: "https://example.com/auth", instructions: "Test", method: "manual" } });
+          },
+          callback: () => Promise.resolve({ data: true }),
+        },
+      },
+    },
+  });
+
+  currentDialog = SupabaseDialog({
+    api: api as never,
+    logger: createLogger(),
+    onClose: () => undefined,
+  });
+
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+
+  expect(currentDialog).toMatchObject({
+    title: "Already connected to Supabase",
+  });
+  expect(authorizeCalls).toBe(1);
+});
+
+test("supabase dialog keeps disconnect failure visible", async () => {
+  let currentDialog: unknown;
+  const api = createDialogApi({
+    ui: {
+      Dialog: (input: unknown) => input,
+      DialogAlert: (input: unknown) => input,
+      DialogConfirm: (input: unknown) => input,
+      toast: (_input: { variant?: string; message: string }) => undefined,
+      dialog: {
+        replace: (factory: () => unknown) => {
+          currentDialog = factory();
+        },
+        clear: () => undefined,
+      },
+    },
+    client: {
+      app: {
+        log: (_input: unknown) => Promise.resolve(true),
+      },
+      tui: {
+        clearPrompt: () => Promise.resolve({ data: true }),
+        appendPrompt: (_input: unknown) => Promise.resolve({ data: true }),
+        submitPrompt: () => Promise.resolve({ data: true }),
+      },
+      session: {
+        promptAsync: () => Promise.resolve({ data: true }),
+      },
+      provider: {
+        oauth: {
+          authorize: () => Promise.reject(new Error("disconnect unavailable")),
+          callback: () => Promise.resolve({ data: true }),
+        },
+      },
+    },
+  });
+
+  const dialog = SupabaseDialog({
+    api: api as never,
+    logger: createLogger(),
+    onClose: () => api.ui.dialog.clear(),
+    initialState: { type: "already_connected" },
+  }) as { onCancel?: () => Promise<void> };
+  currentDialog = dialog;
+
+  await dialog.onCancel?.();
+
+  expect(api.__test.cleared).toBe(0);
+  expect(currentDialog).toMatchObject({
+    title: "Supabase connection status unknown",
+  });
+});
+
 test("supabase dialog unknown state offers retry and continue", async () => {
   const api = createDialogApi();
   const dialog = SupabaseDialog({

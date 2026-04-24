@@ -318,6 +318,7 @@ describe("server tools auth helper", () => {
     await disconnectSupabaseAuth(input, { fetch: fetchMock });
 
     await expect(readSavedAuth(input)).resolves.toEqual({ version: 1 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   test("clears saved auth and host auth when refresh is unauthorized", async () => {
