@@ -361,10 +361,11 @@ export function SupabaseDialog(props: SupabaseDialogProps) {
   if (currentState.type === "already_connected") {
     return props.api.ui.DialogConfirm({
       title: "Already connected to Supabase",
-      message: "Your saved Supabase login is ready to use. Continue to close this dialog, or cancel to disconnect.",
+      message: "Your saved Supabase login is ready to use. Continue to close this dialog, or disconnect to sign out.",
       onConfirm: closeDialog,
       onCancel: disconnect,
-    });
+      label: "Disconnect",
+    } as import("./opencode-runtime-extensions.ts").DialogConfirmWithLabel);
   }
 
   if (currentState.type === "unknown") {
