@@ -522,6 +522,96 @@ test("supabase dialog starts preflight only once while first check is pending", 
   expect(authorizeCalls).toBe(1);
 });
 
+test("tui plugin reusing the original /supabase dialog factory should not start duplicate preflight work", async () => {
+  let commandsFactory: (() => Array<Record<string, unknown>>) | undefined;
+  let replaceFactory: (() => unknown) | undefined;
+  let authorizeCalls = 0;
+  let resolveFirstAuthorize: (() => void) | undefined;
+
+  await tuiModule.tui(
+    {
+      command: {
+        register: (factory: () => Array<Record<string, unknown>>) => {
+          commandsFactory = factory;
+          return () => {};
+        },
+      },
+      ui: {
+        Dialog: (input: unknown) => input,
+        DialogAlert: (input: unknown) => input,
+        DialogConfirm: (input: unknown) => input,
+        dialog: {
+          replace: (factory: () => unknown) => {
+            replaceFactory = factory;
+          },
+          clear: () => {},
+        },
+        toast: () => {},
+      },
+      client: {
+        provider: {
+          oauth: {
+            authorize: ({ method }: { method?: number }) => {
+              if (method === 1) {
+                authorizeCalls += 1;
+                if (authorizeCalls === 1) {
+                  return new Promise((resolve) => {
+                    resolveFirstAuthorize = () =>
+                      resolve({
+                        data: {
+                          url: "https://supabase.com/",
+                          instructions: JSON.stringify({ status: "connected", checked: false }),
+                          method: "code",
+                        },
+                      });
+                  });
+                }
+
+                return Promise.resolve({
+                  data: {
+                    url: "https://supabase.com/",
+                    instructions: JSON.stringify({ status: "connected", checked: false }),
+                    method: "code",
+                  },
+                });
+              }
+
+              return Promise.resolve({
+                data: {
+                  url: "https://example.com/auth",
+                  instructions: "Test",
+                  method: "manual",
+                },
+              });
+            },
+            callback: () => Promise.resolve({ data: true }),
+          },
+        },
+      },
+    } as never,
+    undefined,
+    {} as never,
+  );
+
+  const command = commandsFactory?.()[0] as { onSelect?: () => void } | undefined;
+  command?.onSelect?.();
+
+  expect(typeof replaceFactory).toBe("function");
+  replaceFactory?.();
+  replaceFactory?.();
+
+  await Promise.resolve();
+  await Promise.resolve();
+
+  expect(authorizeCalls).toBe(1);
+
+  resolveFirstAuthorize?.();
+  await Promise.resolve();
+  await Promise.resolve();
+
+  expect(authorizeCalls).toBe(1);
+});
+
 test("supabase dialog keeps disconnect failure visible", async () => {
   let currentDialog: unknown;
   const api = createDialogApi({

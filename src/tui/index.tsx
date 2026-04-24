@@ -11,7 +11,15 @@ const tui: TuiPlugin = async (api) => {
 
   api.command.register(() => [
     createSupabaseCommand(() => {
-      api.ui.dialog.replace(() => SupabaseDialog({ api, logger, onClose: () => api.ui.dialog.clear() }));
+      const lifecycle = { closed: false };
+      api.ui.dialog.replace(() =>
+        SupabaseDialog({
+          api,
+          logger,
+          lifecycle,
+          onClose: () => api.ui.dialog.clear(),
+        }),
+      );
     }),
   ]);
 };
