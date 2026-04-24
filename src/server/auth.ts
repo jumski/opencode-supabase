@@ -12,7 +12,8 @@ import type { SupabaseLogger } from "../shared/log.ts";
 import { buildAuthorizeUrl, generatePKCE, generateState } from "../shared/oauth.ts";
 import type { FetchLike, SupabaseTokenResponse } from "../shared/types.ts";
 import { HTML_SUCCESS, htmlError } from "./auth-html.ts";
-import { writeSavedAuth } from "./store.ts";
+import { readSavedAuth, writeSavedAuth } from "./store.ts";
+import { NOT_CONNECTED_MESSAGE, disconnectSupabaseAuth, ensureSupabaseToolAuth } from "./tools.ts";
 
 const CALLBACK_PATH = "/auth/callback";
 const CALLBACK_TIMEOUT_MS = 5 * 60 * 1000;
@@ -33,9 +34,47 @@ type AuthDeps = {
   setCallbackTimeout?: typeof setTimeout;
 };
 
+type SupabaseAuthInput = Pick<PluginInput, "client" | "directory" | "serverUrl" | "worktree">;
+
+type SupabaseStatusInstructions =
+  | {
+      status: "connected";
+      checked: false;
+    }
+  | {
+      status: "disconnected";
+      checked: false;
+    }
+  | {
+      status: "refresh_required";
+      checked: true;
+    };
+
 let server: ReturnType<typeof Bun.serve> | undefined;
 let serverPort: number | undefined;
 const pendingAuths = new Map<string, PendingAuth>();
+const REFRESH_BUFFER_MS = 30_000;
+
+function isRefreshNeeded(expires: number) {
+  return expires <= Date.now() + REFRESH_BUFFER_MS;
+}
+
+function encodeStatusInstructions(status: SupabaseStatusInstructions) {
+  return JSON.stringify(status);
+}
+
+async function getStatusInstructions(input: Pick<SupabaseAuthInput, "directory" | "worktree">) {
+  const saved = await readSavedAuth(input);
+  if (!saved.auth) {
+    return encodeStatusInstructions({ status: "disconnected", checked: false });
+  }
+
+  if (!isRefreshNeeded(saved.auth.expires)) {
+    return encodeStatusInstructions({ status: "connected", checked: false });
+  }
+
+  return encodeStatusInstructions({ status: "refresh_required", checked: true });
+}
 
 function callbackUrl(port: number) {
   return `http://localhost:${port}${CALLBACK_PATH}`;
@@ -268,7 +307,7 @@ function waitForCallback(
 }
 
 export function createSupabaseAuth(
-  input: Pick<PluginInput, "directory" | "worktree">,
+  input: SupabaseAuthInput,
   options?: PluginOptions,
   deps: AuthDeps = {},
 ) {
@@ -303,6 +342,56 @@ export function createSupabaseAuth(
                 refresh: tokens.refresh_token,
                 expires,
               };
+            },
+          };
+        },
+      },
+      {
+        type: "oauth" as const,
+        label: "Supabase Status",
+        async authorize(inputs?: Record<string, string>) {
+          if (inputs?.action === "disconnect") {
+            await disconnectSupabaseAuth(input, { fetch: deps.fetch });
+            return {
+              url: "https://supabase.com/",
+              instructions: encodeStatusInstructions({ status: "disconnected", checked: false }),
+              method: "auto" as const,
+              callback: async () => ({ type: "failed" as const }),
+            };
+          }
+
+          const instructions = await getStatusInstructions(input);
+          const status = JSON.parse(instructions) as SupabaseStatusInstructions;
+
+          if (status.status !== "refresh_required") {
+            return {
+              url: "https://supabase.com/",
+              instructions,
+              method: "auto" as const,
+              callback: async () => ({ type: "failed" as const }),
+            };
+          }
+
+          return {
+            url: "https://supabase.com/",
+            instructions,
+            method: "auto" as const,
+            callback: async () => {
+              try {
+                const auth = await ensureSupabaseToolAuth(input, options, deps);
+                return {
+                  type: "success" as const,
+                  access: auth.access,
+                  refresh: auth.refresh,
+                  expires: auth.expires,
+                };
+              } catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                if (message === NOT_CONNECTED_MESSAGE) {
+                  return { type: "failed" as const };
+                }
+                throw error;
+              }
             },
           };
         },

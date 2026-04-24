@@ -10,11 +10,17 @@ import {
 import { readSupabaseConfig } from "../shared/cfg.ts";
 import type { SupabaseLogger } from "../shared/log.ts";
 import type { FetchLike } from "../shared/types.ts";
-import { type SavedAuth, clearSavedAuth, readSavedAuth, writeSavedAuth } from "./store.ts";
+import { type SavedAuth, clearSavedAuth, getStoreFile, readSavedAuth, writeSavedAuth } from "./store.ts";
 
 type ToolDeps = {
   fetch?: FetchLike;
   logger?: SupabaseLogger;
+};
+
+type InFlightRefresh = {
+  promise: Promise<SavedAuth>;
+  syncedDirectories: Set<string>;
+  syncPromises: Map<string, Promise<void>>;
 };
 
 type HostAuthWriter = {
@@ -44,11 +50,33 @@ type SupabaseToolContext = Pick<
   "directory" | "worktree" | "abort" | "sessionID" | "messageID" | "agent" | "metadata" | "ask"
 >;
 
-const NOT_CONNECTED_MESSAGE = "Supabase is not connected. Run /supabase first.";
+export type SupabaseAuthStatus =
+  | {
+      status: "connected";
+      auth: SavedAuth;
+      checked: boolean;
+    }
+  | {
+      status: "disconnected";
+      checked: boolean;
+    }
+  | {
+      status: "unknown";
+      checked: true;
+      message: string;
+    };
+
+export const NOT_CONNECTED_MESSAGE = "Supabase is not connected. Run /supabase first.";
 const REFRESH_BUFFER_MS = 30_000;
+const inFlightRefreshes = new Map<string, InFlightRefresh>();
 
 function isRefreshNeeded(auth: SavedAuth) {
   return auth.expires <= Date.now() + REFRESH_BUFFER_MS;
+}
+
+function isSameAuth(left: SavedAuth | undefined, right: SavedAuth | undefined) {
+  if (!left || !right) return left === right;
+  return left.access === right.access && left.refresh === right.refresh && left.expires === right.expires;
 }
 
 function generateRandomString(length: number) {
@@ -169,55 +197,181 @@ async function clearHostAuth(
   }
 }
 
+async function syncHostAuthForDirectory(entry: InFlightRefresh, input: SupabaseToolInput, auth: SavedAuth) {
+  if (entry.syncedDirectories.has(input.directory)) {
+    return;
+  }
+
+  const existing = entry.syncPromises.get(input.directory);
+  if (existing) {
+    await existing.catch(() => undefined);
+    return;
+  }
+
+  const syncPromise = (async () => {
+    await setHostAuth(input, auth);
+    entry.syncedDirectories.add(input.directory);
+  })().finally(() => {
+    entry.syncPromises.delete(input.directory);
+  });
+
+  entry.syncPromises.set(input.directory, syncPromise);
+  await syncPromise.catch(() => undefined);
+}
+
+export async function disconnectSupabaseAuth(
+  input: SupabaseToolInput,
+  deps: Pick<ToolDeps, "fetch"> = {},
+) {
+  const fetchImpl = deps.fetch ?? fetch;
+  await clearSavedAuth(input);
+  inFlightRefreshes.delete(getStoreFile(input));
+  try {
+    await clearHostAuth(input, fetchImpl);
+  } catch {}
+}
+
+export async function getSupabaseAuthStatus(
+  input: SupabaseToolInput,
+  options?: PluginOptions,
+  deps: ToolDeps = {},
+): Promise<SupabaseAuthStatus> {
+  const saved = await readSavedAuth(input);
+  if (!saved.auth) {
+    return { status: "disconnected", checked: false };
+  }
+
+  if (!isRefreshNeeded(saved.auth)) {
+    return { status: "connected", auth: saved.auth, checked: false };
+  }
+
+  try {
+    const auth = await ensureSupabaseToolAuth(input, options, deps);
+    return { status: "connected", auth, checked: true };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message === NOT_CONNECTED_MESSAGE) {
+      return { status: "disconnected", checked: true };
+    }
+
+    return { status: "unknown", checked: true, message };
+  }
+}
+
 export async function ensureSupabaseToolAuth(
   input: SupabaseToolInput,
   options?: PluginOptions,
   deps: ToolDeps = {},
 ): Promise<SavedAuth> {
-  const fetchImpl = deps.fetch ?? fetch;
+  const refreshKey = getStoreFile(input);
   const saved = await readSavedAuth(input);
   if (!saved.auth) {
     throw new Error(NOT_CONNECTED_MESSAGE);
   }
 
+  const inFlight = inFlightRefreshes.get(refreshKey);
+  if (inFlight) {
+    const fetchImpl = deps.fetch ?? fetch;
+    try {
+      const auth = await inFlight.promise;
+      await syncHostAuthForDirectory(inFlight, input, auth);
+      return auth;
+    } catch (error) {
+      if ((error instanceof Error ? error.message : String(error)) === NOT_CONNECTED_MESSAGE) {
+        try {
+          await clearHostAuth(input, fetchImpl);
+        } catch {}
+      }
+      throw error;
+    }
+  }
+
   if (!isRefreshNeeded(saved.auth)) {
+    try {
+      await setHostAuth(input, saved.auth);
+    } catch {}
     return saved.auth;
   }
 
-  const config = readSupabaseConfig(options);
-
-  try {
-    const refreshed = await refreshTokenThroughBroker(
-      { baseUrl: config.brokerBaseUrl },
-      { refresh_token: saved.auth.refresh },
-      deps.fetch,
-      deps.logger,
-    );
-
-    const nextAuth: SavedAuth = {
-      access: refreshed.access_token,
-      refresh: refreshed.refresh_token,
-      expires: Date.now() + (refreshed.expires_in ?? 3600) * 1000,
-    };
-    await writeSavedAuth(input, nextAuth);
-    try {
-      await setHostAuth(input, nextAuth);
-    } catch {}
-    return nextAuth;
-  } catch (error) {
-    if (error instanceof BrokerClientError && (error.status === 401 || error.status === 400)) {
-      await clearSavedAuth(input);
-      try {
-        await clearHostAuth(input, fetchImpl);
-      } catch {}
+  const refreshEntry: InFlightRefresh = {
+    promise: Promise.resolve({ access: "", refresh: "", expires: 0 }),
+    syncedDirectories: new Set<string>(),
+    syncPromises: new Map<string, Promise<void>>(),
+  };
+  const refreshPromise = (async () => {
+    const fetchImpl = deps.fetch ?? fetch;
+    const current = await readSavedAuth(input);
+    if (!current.auth) {
       throw new Error(NOT_CONNECTED_MESSAGE);
     }
 
-    if (error instanceof BrokerClientError) {
-      throw new Error(`Supabase auth refresh failed: ${error.message}`);
+    if (!isRefreshNeeded(current.auth)) {
+      return current.auth;
     }
-    throw error;
-  }
+
+    const config = readSupabaseConfig(options);
+
+    try {
+      const refreshed = await refreshTokenThroughBroker(
+        { baseUrl: config.brokerBaseUrl },
+        { refresh_token: current.auth.refresh },
+        deps.fetch,
+        deps.logger,
+      );
+
+      const nextAuth: SavedAuth = {
+        access: refreshed.access_token,
+        refresh: refreshed.refresh_token,
+        expires: Date.now() + (refreshed.expires_in ?? 3600) * 1000,
+      };
+
+      const latest = await readSavedAuth(input);
+      if (!latest.auth) {
+        throw new Error(NOT_CONNECTED_MESSAGE);
+      }
+
+      if (!isSameAuth(latest.auth, current.auth)) {
+        return latest.auth;
+      }
+
+      await writeSavedAuth(input, nextAuth);
+      return nextAuth;
+    } catch (error) {
+      if (error instanceof BrokerClientError && (error.status === 401 || error.status === 400)) {
+        const latest = await readSavedAuth(input);
+        if (!isSameAuth(latest.auth, current.auth)) {
+          if (latest.auth) {
+            return latest.auth;
+          }
+          throw new Error(NOT_CONNECTED_MESSAGE);
+        }
+
+        await clearSavedAuth(input);
+        try {
+          await clearHostAuth(input, fetchImpl);
+        } catch {}
+        throw new Error(NOT_CONNECTED_MESSAGE);
+      }
+
+      if (error instanceof BrokerClientError) {
+        throw new Error(`Supabase auth refresh failed: ${error.message}`);
+      }
+      throw error;
+    }
+  })();
+  refreshEntry.promise = refreshPromise
+    .then(async (auth) => {
+      await syncHostAuthForDirectory(refreshEntry, input, auth);
+      return auth;
+    })
+    .finally(() => {
+      if (inFlightRefreshes.get(refreshKey)?.promise === refreshEntry.promise) {
+      inFlightRefreshes.delete(refreshKey);
+      }
+    });
+
+  inFlightRefreshes.set(refreshKey, refreshEntry);
+  return refreshEntry.promise;
 }
 
 export function createSupabaseTools(

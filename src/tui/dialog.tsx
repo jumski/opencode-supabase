@@ -12,14 +12,18 @@ type SupabaseDialogProps = {
   lifecycle?: {
     closed: boolean;
     dismissed?: boolean;
+    preflightPromise?: Promise<void>;
   };
 };
 
 type OAuthState =
+  | { type: "checking_auth" }
   | { type: "idle" }
+  | { type: "already_connected" }
   | { type: "authorizing"; url: string }
   | { type: "waiting_callback"; url: string }
   | { type: "success" }
+  | { type: "unknown"; message: string }
   | { type: "error"; message: string; url?: string };
 
 type ApiResponse<T> = { data?: T; error?: unknown };
@@ -30,6 +34,11 @@ type AuthData = {
   method: string;
 };
 
+type AuthStatus =
+  | { status: "connected"; checked: boolean }
+  | { status: "disconnected"; checked: boolean }
+  | { status: "refresh_required"; checked: true };
+
 type AuthFlowContext = {
   api: TuiPluginApi;
   logger: SupabaseLogger;
@@ -39,6 +48,19 @@ type AuthFlowContext = {
 
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
+}
+
+function parseAuthStatus(instructions: string): AuthStatus {
+  const parsed = JSON.parse(instructions) as Partial<AuthStatus>;
+  if (
+    parsed.status === "connected" ||
+    parsed.status === "disconnected" ||
+    parsed.status === "refresh_required"
+  ) {
+    return parsed as AuthStatus;
+  }
+
+  throw new Error("Invalid Supabase auth status response");
 }
 
 async function openBrowser(url: string, logger: SupabaseLogger) {
@@ -132,9 +154,61 @@ export async function runAuthFlow(context: AuthFlowContext) {
   }
 }
 
+export async function runAuthPreflight(context: Pick<AuthFlowContext, "api" | "logger" | "setState">) {
+  context.setState({ type: "checking_auth" });
+
+  try {
+    const authResponse = (await context.api.client.provider.oauth.authorize({
+      providerID: "supabase",
+      method: 1,
+    })) as ApiResponse<AuthData>;
+
+    if (authResponse.error) {
+      throw new Error(formatAuthError("start", authResponse.error));
+    }
+
+    const instructions = authResponse.data?.instructions;
+    if (!instructions) {
+      throw new Error("Invalid Supabase auth status response");
+    }
+
+    const status = parseAuthStatus(instructions);
+    if (status.status === "connected") {
+      context.setState({ type: "already_connected" });
+      return;
+    }
+
+    if (status.status === "disconnected") {
+      context.setState({ type: "idle" });
+      return;
+    }
+
+    const callbackResponse = (await context.api.client.provider.oauth.callback({
+      providerID: "supabase",
+      method: 1,
+    })) as ApiResponse<boolean>;
+
+    if (callbackResponse.error) {
+      throw new Error(formatAuthError("callback", callbackResponse.error));
+    }
+
+    if (callbackResponse.data === true) {
+      context.setState({ type: "already_connected" });
+      return;
+    }
+
+    context.setState({ type: "idle" });
+  } catch (error) {
+    context.setState({
+      type: "unknown",
+      message: formatAuthError("unknown", error),
+    });
+  }
+}
+
 export function SupabaseDialog(props: SupabaseDialogProps) {
   const lifecycle = props.lifecycle ?? { closed: false };
-  const [state, setStateSignal] = createSignal<OAuthState>(props.initialState ?? { type: "idle" });
+  const [state, setStateSignal] = createSignal<OAuthState>(props.initialState ?? { type: "checking_auth" });
 
   const closeDialog = (dismissed = false) => {
     lifecycle.closed = true;
@@ -185,7 +259,57 @@ export function SupabaseDialog(props: SupabaseDialogProps) {
       },
     });
 
+  const retryPreflight = () => {
+    if (lifecycle.preflightPromise) {
+      return lifecycle.preflightPromise;
+    }
+
+    lifecycle.preflightPromise = runAuthPreflight({
+      api: props.api,
+      logger: props.logger,
+      setState,
+    }).finally(() => {
+      lifecycle.preflightPromise = undefined;
+    });
+
+    return lifecycle.preflightPromise;
+  };
+
+  const disconnect = async () => {
+    try {
+      await props.api.client.provider.oauth.authorize({
+        providerID: "supabase",
+        method: 1,
+        inputs: { action: "disconnect" },
+      });
+      closeDialog();
+    } catch (error) {
+      await props.logger.warn("supabase disconnect failed", {
+        message: getErrorMessage(error),
+      });
+      setState({
+        type: "unknown",
+        message: `Couldn't disconnect from Supabase right now. ${formatAuthError("unknown", error)}`,
+      });
+    }
+  };
+
   const currentState = state();
+
+  if (currentState.type === "checking_auth") {
+    queueMicrotask(() => {
+      if (lifecycle.closed || lifecycle.preflightPromise) {
+        return;
+      }
+      void retryPreflight();
+    });
+
+    return props.api.ui.DialogAlert({
+      title: "Connect Supabase",
+      message: "Checking Supabase connection...",
+      onConfirm: () => closeDialog(true),
+    });
+  }
 
   if (currentState.type === "idle") {
     return props.api.ui.DialogConfirm({
@@ -230,6 +354,25 @@ export function SupabaseDialog(props: SupabaseDialogProps) {
       onConfirm: async () => {
         await startOAuth();
       },
+      onCancel: closeDialog,
+    });
+  }
+
+  if (currentState.type === "already_connected") {
+    return props.api.ui.DialogConfirm({
+      title: "Already connected to Supabase",
+      message: "Your saved Supabase login is ready to use. Continue to close this dialog, or disconnect to sign out.",
+      onConfirm: closeDialog,
+      onCancel: disconnect,
+      label: "Disconnect",
+    } as import("./opencode-runtime-extensions.ts").DialogConfirmWithLabel);
+  }
+
+  if (currentState.type === "unknown") {
+    return props.api.ui.DialogConfirm({
+      title: "Supabase connection status unknown",
+      message: `${currentState.message}\n\nConfirm to retry, or cancel to continue without changing saved auth.`,
+      onConfirm: retryPreflight,
       onCancel: closeDialog,
     });
   }

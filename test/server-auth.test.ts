@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 import { createSupabaseAuth, stopSupabaseAuthServer } from "../src/server/auth.ts";
-import { readSavedAuth } from "../src/server/store.ts";
+import { readSavedAuth, writeSavedAuth } from "../src/server/store.ts";
 import { createSupabaseLogger } from "../src/shared/log.ts";
 import type { FetchLike } from "../src/shared/types.ts";
 
@@ -16,7 +16,13 @@ async function createInput() {
   const root = await mkdtemp(join(tmpdir(), "opencode-supabase-auth-"));
   cleanupPaths.push(root);
   return {
+    client: {
+      auth: {
+        set: mock(async () => true),
+      },
+    },
     directory: join(root, "consumer"),
+    serverUrl: new URL("http://127.0.0.1:7777/"),
     worktree: root,
   };
 }
@@ -24,6 +30,12 @@ async function createInput() {
 function firstAuthMethod(auth: ReturnType<typeof createSupabaseAuth>) {
   const method = auth.methods[0];
   if (!method) throw new Error("Expected an auth method");
+  return method;
+}
+
+function secondAuthMethod(auth: ReturnType<typeof createSupabaseAuth>) {
+  const method = auth.methods[1];
+  if (!method) throw new Error("Expected a status auth method");
   return method;
 }
 
@@ -58,6 +70,102 @@ afterEach(async () => {
 });
 
 describe("server auth hook", () => {
+  test("exposes status method alongside connect oauth", async () => {
+    const input = await createInput();
+
+    const auth = createSupabaseAuth(input as never);
+
+    expect(auth.methods).toHaveLength(2);
+    expect(auth.methods[0]).toMatchObject({ type: "oauth", label: "Supabase" });
+    expect(auth.methods[1]).toMatchObject({ type: "oauth", label: "Supabase Status" });
+  });
+
+  test("status method reports disconnected when no saved auth exists", async () => {
+    const input = await createInput();
+
+    const auth = createSupabaseAuth(input as never);
+    const result = await secondAuthMethod(auth).authorize();
+
+    expect(JSON.parse(result.instructions)).toEqual({
+      status: "disconnected",
+      checked: false,
+    });
+  });
+
+  test("status method reports refresh_required when saved auth is stale", async () => {
+    const input = await createInput();
+    await writeSavedAuth(input as never, {
+      access: "expired-access",
+      refresh: "saved-refresh",
+      expires: Date.now() - 1_000,
+    });
+
+    const auth = createSupabaseAuth(input as never);
+    const result = await secondAuthMethod(auth).authorize();
+
+    expect(JSON.parse(result.instructions)).toEqual({
+      status: "refresh_required",
+      checked: true,
+    });
+  });
+
+  test("status method disconnect action clears saved auth", async () => {
+    const input = await createInput();
+    await writeSavedAuth(input as never, {
+      access: "saved-access",
+      refresh: "saved-refresh",
+      expires: Date.now() + 60_000,
+    });
+
+    const auth = createSupabaseAuth(input as never);
+    const result = await secondAuthMethod(auth).authorize({ action: "disconnect" });
+
+    expect(JSON.parse(result.instructions)).toEqual({
+      status: "disconnected",
+      checked: false,
+    });
+    expect(await readSavedAuth(input as never)).toEqual({ version: 1 });
+  });
+
+  test("status method refresh callback reports failed when refresh token is invalid", async () => {
+    const input = await createInput();
+    process.env.OPENCODE_SUPABASE_BROKER_URL = "https://example.com/broker";
+    await writeSavedAuth(input as never, {
+      access: "expired-access",
+      refresh: "saved-refresh",
+      expires: Date.now() - 1_000,
+    });
+
+    const auth = createSupabaseAuth(
+      input as never,
+      undefined,
+      {
+        fetch: mock(async () =>
+          new Response(
+            JSON.stringify({
+              error: {
+                code: "invalid_grant",
+                message: "Refresh token expired",
+              },
+            }),
+            {
+              status: 401,
+              headers: { "Content-Type": "application/json" },
+            },
+          ),
+        ) as never,
+      },
+    );
+
+    const result = await secondAuthMethod(auth).authorize();
+
+    expect(JSON.parse(result.instructions)).toEqual({
+      status: "refresh_required",
+      checked: true,
+    });
+    await expect(result.callback?.()).resolves.toEqual({ type: "failed" });
+  });
+
   test("logs auth authorize and callback completion without secrets", async () => {
     const input = await createInput();
     process.env.OPENCODE_SUPABASE_BROKER_URL = "https://example.com/broker";
@@ -459,6 +567,9 @@ describe("server auth hook", () => {
       access: "access-123",
       refresh: "refresh-123",
     });
+    if (callbackResult.type !== "success") {
+      throw new Error("Expected OAuth callback to succeed");
+    }
     expect(typeof callbackResult.expires).toBe("number");
     expect(callbackResult.expires).toBeGreaterThan(Date.now());
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -555,6 +666,9 @@ describe("server auth hook", () => {
       access: "access-123",
       refresh: "refresh-123",
     });
+    if (callbackResult.type !== "success") {
+      throw new Error("Expected OAuth callback to succeed");
+    }
     expect(typeof callbackResult.expires).toBe("number");
     expect(fetchMock).toHaveBeenCalledTimes(1);
     await expect(readSavedAuth({ ...input, worktree: "/" } as never)).resolves.toEqual({
@@ -606,6 +720,9 @@ describe("server auth hook", () => {
       access: "access-123",
       refresh: "refresh-123",
     });
+    if (callbackResult.type !== "success") {
+      throw new Error("Expected OAuth callback to succeed");
+    }
     expect(typeof callbackResult.expires).toBe("number");
     await expect(readSavedAuth({ ...input, worktree: "" } as never)).resolves.toEqual({
       version: 1,
