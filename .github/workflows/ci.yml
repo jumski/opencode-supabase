@@ -91,7 +91,7 @@ jobs:
           export XDG_CACHE_HOME="$HOME/.cache"
 
           TARBALL="$(npm pack --json | jq -r '.[0].filename')"
-          SPEC="opencode-supabase@file:$(pwd)/$TARBALL"
+          SPEC="file://$(pwd)/$TARBALL"
 
           WORKDIR="$(mktemp -d)"
           cd "$WORKDIR"
