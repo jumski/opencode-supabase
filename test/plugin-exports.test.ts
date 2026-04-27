@@ -375,6 +375,73 @@ test("supabase auth success creates a session from home before onboarding", asyn
   ]);
 });
 
+test("supabase auth success waits for session navigation to settle before onboarding from home", async () => {
+  let sessionRouteReady = false;
+
+  const api = createDialogApi({
+    route: {
+      current: {
+        name: "home",
+      },
+      navigate: (name: string, params?: unknown) => {
+        api.__test.routeOps.push({ op: "navigate", name, params });
+        queueMicrotask(() => {
+          sessionRouteReady = true;
+        });
+      },
+    },
+    client: {
+      app: {
+        log: (_input: unknown) => Promise.resolve(true),
+      },
+      tui: {
+        clearPrompt: () => Promise.resolve({ data: true }),
+        appendPrompt: (_input: unknown) => Promise.resolve({ data: true }),
+        submitPrompt: () => Promise.resolve({ data: true }),
+      },
+      session: {
+        create: (input?: unknown) => {
+          api.__test.sessionOps.push({ op: "create", payload: input });
+          return Promise.resolve({ data: { id: "session-created" } });
+        },
+        promptAsync: (input: unknown) => {
+          if (!sessionRouteReady) {
+            throw new Error("promptAsync called before session navigation settled");
+          }
+          api.__test.sessionOps.push({ op: "promptAsync", payload: input });
+          return Promise.resolve({ data: true });
+        },
+      },
+      provider: {
+        oauth: {
+          authorize: () => Promise.resolve({ data: { url: "https://example.com/auth", instructions: "Test", method: "manual" } }),
+          callback: () => Promise.resolve({ data: true }),
+        },
+      },
+    },
+  });
+  const lifecycle = { closed: false };
+
+  const dialog = SupabaseDialog({
+    api: api as never,
+    logger: createLogger(),
+    onClose: () => api.ui.dialog.clear(),
+    initialState: { type: "idle" },
+    lifecycle,
+  }) as { onConfirm?: () => Promise<void> };
+
+  await dialog.onConfirm?.();
+  await Promise.resolve();
+
+  expect(api.__test.sessionOps).toEqual([
+    { op: "create", payload: {} },
+    expect.objectContaining({
+      op: "promptAsync",
+      payload: expect.objectContaining({ sessionID: "session-created", noReply: true }),
+    }),
+  ]);
+});
+
 test("supabase already-connected confirm injects onboarding once", async () => {
   const api = createDialogApi({
     route: {

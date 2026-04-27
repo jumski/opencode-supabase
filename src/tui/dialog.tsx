@@ -91,6 +91,12 @@ async function openBrowser(url: string, logger: SupabaseLogger) {
   }
 }
 
+function waitForNextMacrotask() {
+  return new Promise<void>((resolve) => {
+    setTimeout(resolve, 0);
+  });
+}
+
 async function injectOnboardingPrompt(
   api: TuiPluginApi,
   logger: SupabaseLogger,
@@ -103,11 +109,13 @@ async function injectOnboardingPrompt(
   const currentRoute = api.route.current;
   let sessionID =
     currentRoute.name === "session" ? (currentRoute.params as { sessionID?: string } | undefined)?.sessionID : undefined;
+  let createdSessionFromHome = false;
 
   if (!sessionID && currentRoute.name === "home") {
     const response = await api.client.session.create({});
     sessionID = (response.data as { id?: string } | undefined)?.id;
     if (sessionID) {
+      createdSessionFromHome = true;
       api.route.navigate("session", { sessionID });
     }
   }
@@ -131,6 +139,10 @@ async function injectOnboardingPrompt(
   onboardedSessionIDs.add(sessionID);
 
   try {
+    if (createdSessionFromHome) {
+      await waitForNextMacrotask();
+    }
+
     await api.client.session.promptAsync({
       sessionID,
       noReply: true,
