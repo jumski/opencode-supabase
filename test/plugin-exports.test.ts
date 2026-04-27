@@ -348,48 +348,9 @@ test("supabase auth success injects ignored onboarding into current session", as
   expect(api.__test.promptOps).toEqual([]);
 });
 
-test("supabase auth success creates a session from home before onboarding", async () => {
-  const api = createDialogApi();
-  const lifecycle = { closed: false };
-
-  const dialog = SupabaseDialog({
-    api: api as never,
-    logger: createLogger(),
-    onClose: () => api.ui.dialog.clear(),
-    initialState: { type: "idle" },
-    lifecycle,
-  }) as { onConfirm?: () => Promise<void> };
-
-  await dialog.onConfirm?.();
-  await Promise.resolve();
-
-  expect(api.__test.sessionOps).toEqual([
-    { op: "create", payload: {} },
-    expect.objectContaining({
-      op: "promptAsync",
-      payload: expect.objectContaining({ sessionID: "session-created", noReply: true }),
-    }),
-  ]);
-  expect(api.__test.routeOps).toEqual([
-    { op: "navigate", name: "session", params: { sessionID: "session-created" } },
-  ]);
-});
-
-test("supabase auth success waits for session navigation to settle before onboarding from home", async () => {
-  let sessionRouteReady = false;
-
+test("supabase auth success creates a session from home before OAuth not after", async () => {
+  const ops: string[] = [];
   const api = createDialogApi({
-    route: {
-      current: {
-        name: "home",
-      },
-      navigate: (name: string, params?: unknown) => {
-        api.__test.routeOps.push({ op: "navigate", name, params });
-        queueMicrotask(() => {
-          sessionRouteReady = true;
-        });
-      },
-    },
     client: {
       app: {
         log: (_input: unknown) => Promise.resolve(true),
@@ -401,21 +362,26 @@ test("supabase auth success waits for session navigation to settle before onboar
       },
       session: {
         create: (input?: unknown) => {
+          ops.push("create");
           api.__test.sessionOps.push({ op: "create", payload: input });
           return Promise.resolve({ data: { id: "session-created" } });
         },
         promptAsync: (input: unknown) => {
-          if (!sessionRouteReady) {
-            throw new Error("promptAsync called before session navigation settled");
-          }
+          ops.push("promptAsync");
           api.__test.sessionOps.push({ op: "promptAsync", payload: input });
           return Promise.resolve({ data: true });
         },
       },
       provider: {
         oauth: {
-          authorize: () => Promise.resolve({ data: { url: "https://example.com/auth", instructions: "Test", method: "manual" } }),
-          callback: () => Promise.resolve({ data: true }),
+          authorize: () => {
+            ops.push("authorize");
+            return Promise.resolve({ data: { url: "https://example.com/auth", instructions: "Test", method: "manual" } });
+          },
+          callback: () => {
+            ops.push("callback");
+            return Promise.resolve({ data: true });
+          },
         },
       },
     },
@@ -433,13 +399,21 @@ test("supabase auth success waits for session navigation to settle before onboar
   await dialog.onConfirm?.();
   await Promise.resolve();
 
-  expect(api.__test.sessionOps).toEqual([
-    { op: "create", payload: {} },
-    expect.objectContaining({
-      op: "promptAsync",
-      payload: expect.objectContaining({ sessionID: "session-created", noReply: true }),
-    }),
+  // Session must be created and navigated BEFORE OAuth authorize runs
+  const createIdx = ops.indexOf("create");
+  const authorizeIdx = ops.indexOf("authorize");
+  expect(createIdx).toBeGreaterThan(-1);
+  expect(authorizeIdx).toBeGreaterThan(-1);
+  expect(createIdx).toBeLessThan(authorizeIdx);
+
+  expect(api.__test.routeOps).toEqual([
+    { op: "navigate", name: "session", params: { sessionID: "session-created" } },
   ]);
+
+  expect(api.__test.sessionOps).toContainEqual(expect.objectContaining({
+    op: "promptAsync",
+    payload: expect.objectContaining({ sessionID: "session-created", noReply: true }),
+  }));
 });
 
 test("supabase already-connected confirm injects onboarding once", async () => {
@@ -1045,6 +1019,7 @@ test("error retry starts fresh oauth without using stale url", async () => {
         submitPrompt: () => Promise.resolve({ data: true }),
       },
       session: {
+        create: () => Promise.resolve({ data: { id: "ses-retry" } }),
         promptAsync: () => Promise.resolve({ data: true }),
       },
       provider: {

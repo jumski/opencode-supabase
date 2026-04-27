@@ -14,6 +14,7 @@ type SupabaseDialogProps = {
     dismissed?: boolean;
     preflightPromise?: Promise<void>;
     onboardingPromptSent?: boolean;
+    chatSessionID?: string;
   };
 };
 
@@ -91,10 +92,20 @@ async function openBrowser(url: string, logger: SupabaseLogger) {
   }
 }
 
-function waitForNextMacrotask() {
-  return new Promise<void>((resolve) => {
-    setTimeout(resolve, 0);
-  });
+async function ensureChatSession(api: TuiPluginApi) {
+  const currentRoute = api.route.current;
+  let sessionID =
+    currentRoute.name === "session" ? (currentRoute.params as { sessionID?: string } | undefined)?.sessionID : undefined;
+
+  if (!sessionID && currentRoute.name === "home") {
+    const response = await api.client.session.create({});
+    sessionID = (response.data as { id?: string } | undefined)?.id;
+    if (sessionID) {
+      api.route.navigate("session", { sessionID });
+    }
+  }
+
+  return sessionID;
 }
 
 async function injectOnboardingPrompt(
@@ -106,27 +117,14 @@ async function injectOnboardingPrompt(
     return;
   }
 
-  const currentRoute = api.route.current;
-  let sessionID =
-    currentRoute.name === "session" ? (currentRoute.params as { sessionID?: string } | undefined)?.sessionID : undefined;
-  let createdSessionFromHome = false;
-
-  if (!sessionID && currentRoute.name === "home") {
-    const response = await api.client.session.create({});
-    sessionID = (response.data as { id?: string } | undefined)?.id;
-    if (sessionID) {
-      createdSessionFromHome = true;
-      api.route.navigate("session", { sessionID });
-    }
-  }
-
-  if (!sessionID) {
+  if (!lifecycle.chatSessionID) {
     await logger.warn("supabase onboarding prompt skipped", {
       reason: "missing_session",
     });
     return;
   }
 
+  const sessionID = lifecycle.chatSessionID;
   const onboardedSessionIDs = onboardedSessionIDsByApi.get(api) ?? new Set<string>();
   onboardedSessionIDsByApi.set(api, onboardedSessionIDs);
 
@@ -139,10 +137,6 @@ async function injectOnboardingPrompt(
   onboardedSessionIDs.add(sessionID);
 
   try {
-    if (createdSessionFromHome) {
-      await waitForNextMacrotask();
-    }
-
     await api.client.session.promptAsync({
       sessionID,
       noReply: true,
@@ -338,8 +332,11 @@ export function SupabaseDialog(props: SupabaseDialogProps) {
     );
   };
 
-  const startOAuth = () =>
-    runAuthFlow({
+  const startOAuth = async () => {
+    if (!lifecycle.chatSessionID) {
+      lifecycle.chatSessionID = await ensureChatSession(props.api);
+    }
+    return runAuthFlow({
       api: props.api,
       logger: props.logger,
       setState,
@@ -347,6 +344,7 @@ export function SupabaseDialog(props: SupabaseDialogProps) {
         return injectOnboardingPrompt(props.api, props.logger, lifecycle);
       },
     });
+  };
 
   const retryPreflight = () => {
     if (lifecycle.preflightPromise) {
@@ -451,6 +449,9 @@ export function SupabaseDialog(props: SupabaseDialogProps) {
       title: "You're all set",
       message: "Your Supabase account is connected and ready to go.\n\nClose this dialog to continue, or disconnect to sign out.",
       onConfirm: async () => {
+        if (!lifecycle.chatSessionID) {
+          lifecycle.chatSessionID = await ensureChatSession(props.api);
+        }
         await injectOnboardingPrompt(props.api, props.logger, lifecycle);
         closeDialog();
       },
