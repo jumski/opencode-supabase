@@ -313,9 +313,8 @@ export function SupabaseDialog(props: SupabaseDialogProps) {
 
   if (currentState.type === "idle") {
     return props.api.ui.DialogConfirm({
-      title: "Connect Supabase",
-      message:
-        "This will open a browser window to authorize OpenCode to access your Supabase account. Continue?",
+      title: "Connect your Supabase account",
+      message: "Opens your browser to authorize OpenCode to access your Supabase account.",
       onConfirm: startOAuth,
       onCancel: closeDialog,
     });
@@ -331,7 +330,7 @@ export function SupabaseDialog(props: SupabaseDialogProps) {
     }
 
     return props.api.ui.DialogAlert({
-      title: "Connect Supabase",
+      title: "Connect to Supabase",
       message: `Complete authorization in your browser.\n\nIf the browser did not open, visit:\n${currentState.url}\n\nWaiting for authorization...`,
       onConfirm: () => closeDialog(true),
     });
@@ -339,7 +338,7 @@ export function SupabaseDialog(props: SupabaseDialogProps) {
 
   if (currentState.type === "waiting_callback") {
     return props.api.ui.DialogAlert({
-      title: "Connect Supabase",
+      title: "Connect to Supabase",
       message: `Complete authorization in your browser.\n\nIf the browser did not open, visit:\n${currentState.url}\n\nWaiting for authorization...`,
       onConfirm: () => closeDialog(true),
     });
@@ -360,8 +359,8 @@ export function SupabaseDialog(props: SupabaseDialogProps) {
 
   if (currentState.type === "already_connected") {
     return props.api.ui.DialogConfirm({
-      title: "Already connected to Supabase",
-      message: "Your saved Supabase login is ready to use. Continue to close this dialog, or disconnect to sign out.",
+      title: "You're all set",
+      message: "Your Supabase account is connected and ready to go.\n\nClose this dialog to continue, or disconnect to sign out.",
       onConfirm: closeDialog,
       onCancel: disconnect,
       label: "Disconnect",
@@ -380,7 +379,7 @@ export function SupabaseDialog(props: SupabaseDialogProps) {
   return props.api.ui.DialogConfirm({
     title: "Connected to Supabase",
     message:
-      "Your account is ready. Try asking:\n\n  list my Supabase projects\n  list my Supabase organizations\n  for organization <name>, list available regions\n\nRun an example?",
+      "Your account is ready. Try asking:\n\n  list my Supabase projects\n  list my Supabase organizations\n  for organization <name>, list available regions\n\nHit Confirm to try it out",
     onConfirm: async () => {
       try {
         await props.api.client.tui.appendPrompt({
