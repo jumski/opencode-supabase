@@ -13,8 +13,23 @@ type SupabaseDialogProps = {
     closed: boolean;
     dismissed?: boolean;
     preflightPromise?: Promise<void>;
+    onboardingPromptSent?: boolean;
+    chatSessionID?: string;
   };
 };
+
+const ONBOARDING_MESSAGE = `Supabase is connected.
+
+You can ask me about:
+- your organizations and projects
+- API keys for a project
+- available database regions
+- creating a new project
+
+Try this:
+list my Supabase projects`;
+
+const onboardedSessionIDsByApi = new WeakMap<TuiPluginApi, Set<string>>();
 
 type OAuthState =
   | { type: "checking_auth" }
@@ -43,7 +58,7 @@ type AuthFlowContext = {
   api: TuiPluginApi;
   logger: SupabaseLogger;
   setState: (state: OAuthState) => void;
-  onSuccess: () => void;
+  onSuccess: () => void | Promise<void>;
 };
 
 function getErrorMessage(error: unknown) {
@@ -69,6 +84,71 @@ async function openBrowser(url: string, logger: SupabaseLogger) {
     await open.default(url);
   } catch (error) {
     await logger.warn("supabase browser open failed", {
+      message: getErrorMessage(error),
+    });
+  }
+}
+
+async function ensureChatSession(api: TuiPluginApi) {
+  const currentRoute = api.route.current;
+  let sessionID =
+    currentRoute.name === "session" ? (currentRoute.params as { sessionID?: string } | undefined)?.sessionID : undefined;
+
+  if (!sessionID && currentRoute.name === "home") {
+    const response = await api.client.session.create({});
+    sessionID = (response.data as { id?: string } | undefined)?.id;
+    if (sessionID) {
+      api.route.navigate("session", { sessionID });
+    }
+  }
+
+  return sessionID;
+}
+
+async function injectOnboardingPrompt(
+  api: TuiPluginApi,
+  logger: SupabaseLogger,
+  lifecycle: NonNullable<SupabaseDialogProps["lifecycle"]>,
+) {
+  if (lifecycle.onboardingPromptSent) {
+    return;
+  }
+
+  if (!lifecycle.chatSessionID) {
+    await logger.warn("supabase onboarding prompt skipped", {
+      reason: "missing_session",
+    });
+    return;
+  }
+
+  const sessionID = lifecycle.chatSessionID;
+  const onboardedSessionIDs = onboardedSessionIDsByApi.get(api) ?? new Set<string>();
+  onboardedSessionIDsByApi.set(api, onboardedSessionIDs);
+
+  if (onboardedSessionIDs.has(sessionID)) {
+    lifecycle.onboardingPromptSent = true;
+    return;
+  }
+
+  lifecycle.onboardingPromptSent = true;
+  onboardedSessionIDs.add(sessionID);
+
+  try {
+    await api.client.session.promptAsync({
+      sessionID,
+      noReply: true,
+      parts: [
+        {
+          type: "text",
+          text: ONBOARDING_MESSAGE,
+          ignored: true,
+        },
+      ],
+    });
+  } catch (error) {
+    lifecycle.onboardingPromptSent = false;
+    onboardedSessionIDs.delete(sessionID);
+    await logger.warn("supabase onboarding prompt failed", {
       message: getErrorMessage(error),
     });
   }
@@ -145,7 +225,7 @@ export async function runAuthFlow(context: AuthFlowContext) {
 
   if (completed) {
     try {
-      context.onSuccess();
+      await context.onSuccess();
     } catch (error) {
       await context.logger.error("supabase auth success handler failed", {
         message: getErrorMessage(error),
@@ -249,15 +329,30 @@ export function SupabaseDialog(props: SupabaseDialogProps) {
     );
   };
 
-  const startOAuth = () =>
-    runAuthFlow({
+  const startOAuth = async () => {
+    if (!lifecycle.chatSessionID) {
+      lifecycle.chatSessionID = await ensureChatSession(props.api);
+    }
+    return runAuthFlow({
       api: props.api,
       logger: props.logger,
       setState,
       onSuccess: () => {
-        // Success dialog handles user-facing confirmation
+        if (lifecycle.dismissed) {
+          props.api.ui.toast({
+            message: "Supabase connected",
+          });
+          return;
+        }
+
+        if (lifecycle.closed) {
+          return;
+        }
+
+        return injectOnboardingPrompt(props.api, props.logger, lifecycle);
       },
     });
+  };
 
   const retryPreflight = () => {
     if (lifecycle.preflightPromise) {
@@ -282,6 +377,7 @@ export function SupabaseDialog(props: SupabaseDialogProps) {
         method: 1,
         inputs: { action: "disconnect" },
       });
+      props.api.ui.toast({ message: "Disconnected from Supabase" });
       closeDialog();
     } catch (error) {
       await props.logger.warn("supabase disconnect failed", {
@@ -361,7 +457,13 @@ export function SupabaseDialog(props: SupabaseDialogProps) {
     return props.api.ui.DialogConfirm({
       title: "You're all set",
       message: "Your Supabase account is connected and ready to go.\n\nClose this dialog to continue, or disconnect to sign out.",
-      onConfirm: closeDialog,
+      onConfirm: async () => {
+        if (!lifecycle.chatSessionID) {
+          lifecycle.chatSessionID = await ensureChatSession(props.api);
+        }
+        await injectOnboardingPrompt(props.api, props.logger, lifecycle);
+        closeDialog();
+      },
       onCancel: disconnect,
       label: "Disconnect",
     } as import("./opencode-runtime-extensions.ts").DialogConfirmWithLabel);
@@ -376,22 +478,9 @@ export function SupabaseDialog(props: SupabaseDialogProps) {
     });
   }
 
-  return props.api.ui.DialogConfirm({
+  return props.api.ui.DialogAlert({
     title: "Connected to Supabase",
-    message:
-      "Your account is ready. Try asking:\n\n  list my Supabase projects\n  list my Supabase organizations\n  for organization <name>, list available regions\n\nHit Confirm to try it out",
-    onConfirm: async () => {
-      try {
-        await props.api.client.tui.appendPrompt({
-          text: "list my Supabase projects",
-        });
-      } catch (error) {
-        await props.logger.warn("supabase append prompt failed", {
-          message: getErrorMessage(error),
-        });
-      }
-      closeDialog();
-    },
-    onCancel: closeDialog,
+    message: "Your account is ready. Close this dialog and ask me to list your Supabase projects.",
+    onConfirm: closeDialog,
   });
 }

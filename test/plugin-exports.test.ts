@@ -42,12 +42,17 @@ function createDialogApi(overrides?: Record<string, unknown>) {
   const dialogConfirms: unknown[] = [];
   const toasts: Array<{ variant?: string; message: string }> = [];
   const promptOps: Array<{ op: string; payload?: unknown }> = [];
+  const sessionOps: Array<{ op: string; payload?: unknown }> = [];
+  const routeOps: Array<{ op: string; name: string; params?: unknown }> = [];
   let openCalls: string[] = [];
 
   const api = {
     route: {
       current: {
         name: "home",
+      },
+      navigate: (name: string, params?: unknown) => {
+        routeOps.push({ op: "navigate", name, params });
       },
     },
     ui: {
@@ -94,7 +99,14 @@ function createDialogApi(overrides?: Record<string, unknown>) {
         },
       },
       session: {
-        promptAsync: () => Promise.resolve({ data: true }),
+        create: (input?: unknown) => {
+          sessionOps.push({ op: "create", payload: input });
+          return Promise.resolve({ data: { id: "session-created" } });
+        },
+        promptAsync: (input: unknown) => {
+          sessionOps.push({ op: "promptAsync", payload: input });
+          return Promise.resolve({ data: true });
+        },
       },
       provider: {
         oauth: {
@@ -109,6 +121,8 @@ function createDialogApi(overrides?: Record<string, unknown>) {
       dialogConfirms,
       toasts,
       promptOps,
+      sessionOps,
+      routeOps,
       get cleared() {
         return cleared;
       },
@@ -131,6 +145,8 @@ function createDialogApi(overrides?: Record<string, unknown>) {
       dialogConfirms: unknown[];
       toasts: Array<{ variant?: string; message: string }>;
       promptOps: Array<{ op: string; payload?: unknown }>;
+      sessionOps: Array<{ op: string; payload?: unknown }>;
+      routeOps: Array<{ op: string; name: string; params?: unknown }>;
       cleared: number;
       replaced: number;
       openCalls: string[];
@@ -224,39 +240,93 @@ test("tui plugin registers /supabase and opens a closable dialog", async () => {
   expect(cleared).toBe(0);
 });
 
-test("supabase dialog success is silent when waiting dialog was dismissed", async () => {
-  const api = createDialogApi();
+test("supabase dialog does not inject onboarding after waiting dialog was dismissed", async () => {
+  let currentDialog: unknown;
+  let releaseCallback!: () => void;
+
+  const api = createDialogApi({
+    route: {
+      current: {
+        name: "session",
+        params: { sessionID: "session-current" },
+      },
+      navigate: () => undefined,
+    },
+    ui: {
+      Dialog: (input: unknown) => input,
+      DialogAlert: (input: unknown) => {
+        currentDialog = input;
+        return input;
+      },
+      DialogConfirm: (input: unknown) => {
+        currentDialog = input;
+        return input;
+      },
+      toast: (input: { variant?: string; message: string }) => {
+        api.__test.toasts.push(input);
+      },
+      dialog: {
+        replace: (factory: () => unknown) => {
+          currentDialog = factory();
+        },
+        clear: () => undefined,
+      },
+    },
+    client: {
+      app: {
+        log: (_input: unknown) => Promise.resolve(true),
+      },
+      tui: {
+        clearPrompt: () => Promise.resolve({ data: true }),
+        appendPrompt: (_input: unknown) => Promise.resolve({ data: true }),
+        submitPrompt: () => Promise.resolve({ data: true }),
+      },
+      session: {
+        promptAsync: (input: unknown) => {
+          api.__test.sessionOps.push({ op: "promptAsync", payload: input });
+          return Promise.resolve({ data: true });
+        },
+      },
+      provider: {
+        oauth: {
+          authorize: () => Promise.resolve({ data: { url: "https://example.com/auth", instructions: "Test", method: "manual" } }),
+          callback: () =>
+            new Promise((resolve) => {
+              releaseCallback = () => resolve({ data: true });
+            }),
+        },
+      },
+    },
+  });
   const lifecycle = { closed: false, dismissed: false };
 
   const dialog = SupabaseDialog({
     api: api as never,
     logger: createLogger(),
     onClose: () => api.ui.dialog.clear(),
-    initialState: { type: "waiting_callback", url: "https://example.com/auth" },
+    initialState: { type: "idle" },
     lifecycle,
-  });
+  }) as { onConfirm?: () => Promise<void> };
 
-  // Trigger the waiting dialog's onConfirm (dismiss)
-  const waitingDialog = api.__test.dialogAlerts[0] as { onConfirm?: () => void };
-  waitingDialog?.onConfirm?.();
+  const authPromise = dialog.onConfirm?.();
+  await new Promise((resolve) => setTimeout(resolve, 0));
 
-  expect(api.__test.cleared).toBe(1);
+  expect(currentDialog).toMatchObject({ title: "Connect to Supabase" });
+  (currentDialog as { onConfirm?: () => void }).onConfirm?.();
   expect(lifecycle.dismissed).toBe(true);
 
-  // Now simulate success state transition through setState
-  // Since lifecycle is closed and dismissed, setState should not replace dialog
-  const initialConfirmCount = api.__test.dialogConfirms.length;
+  releaseCallback();
+  await authPromise;
 
-  // Manually invoke what setState would do (it checks lifecycle.closed internally)
-  // Since lifecycle.closed = true, setState would return early and do nothing
-  expect(lifecycle.closed).toBe(true);
-
-  // Verify no additional dialogs were created
-  expect(api.__test.dialogConfirms).toHaveLength(initialConfirmCount);
-  expect(api.__test.toasts).toEqual([]);
+  expect(api.__test.sessionOps.filter((op) => op.op === "promptAsync")).toHaveLength(0);
+  expect(api.__test.toasts).toEqual([
+    {
+      message: "Supabase connected",
+    },
+  ]);
 });
 
-test("supabase dialog success shows example prompts and inserts on confirm", async () => {
+test("supabase dialog success closes without inserting an example prompt", async () => {
   const states: Array<Record<string, unknown>> = [];
   const api = createDialogApi();
 
@@ -278,21 +348,214 @@ test("supabase dialog success shows example prompts and inserts on confirm", asy
 
   expect(successDialog.title).toBe("Connected to Supabase");
   expect(successDialog.message).toBe(
-    "Your account is ready. Try asking:\n\n  list my Supabase projects\n  list my Supabase organizations\n  for organization <name>, list available regions\n\nHit Confirm to try it out",
+    "Your account is ready. Close this dialog and ask me to list your Supabase projects.",
   );
+  expect((successDialog as Record<string, unknown>).onCancel).toBeUndefined();
+  expect(api.__test.dialogAlerts).toHaveLength(1);
+  expect(api.__test.dialogConfirms).toHaveLength(0);
 
   await successDialog.onConfirm?.();
 
-  expect(api.__test.promptOps).toEqual([
-    {
-      op: "appendPrompt",
-      payload: { text: "list my Supabase projects" },
-    },
-  ]);
+  expect(api.__test.promptOps).toEqual([]);
   expect(api.__test.promptOps.some((op) => op.op === "submitPrompt")).toBe(false);
   expect(api.__test.cleared).toBe(1);
   expect(api.__test.toasts).toEqual([]);
   expect(states.at(-1)).toEqual({ type: "success" });
+});
+
+test("supabase auth success injects ignored onboarding into current session", async () => {
+  const api = createDialogApi({
+    route: {
+      current: {
+        name: "session",
+        params: { sessionID: "session-current" },
+      },
+      navigate: () => undefined,
+    },
+  });
+  const lifecycle = { closed: false };
+
+  const dialog = SupabaseDialog({
+    api: api as never,
+    logger: createLogger(),
+    onClose: () => api.ui.dialog.clear(),
+    initialState: { type: "idle" },
+    lifecycle,
+  }) as { onConfirm?: () => Promise<void> };
+
+  await dialog.onConfirm?.();
+  await Promise.resolve();
+
+  expect(api.__test.sessionOps).toEqual([
+    {
+      op: "promptAsync",
+      payload: {
+        sessionID: "session-current",
+        noReply: true,
+        parts: [
+          expect.objectContaining({
+            type: "text",
+            ignored: true,
+            text: expect.stringContaining("your organizations and projects"),
+          }),
+        ],
+      },
+    },
+  ]);
+  expect(api.__test.promptOps).toEqual([]);
+});
+
+test("supabase auth success creates a session from home before OAuth not after", async () => {
+  const ops: string[] = [];
+  const api = createDialogApi({
+    client: {
+      app: {
+        log: (_input: unknown) => Promise.resolve(true),
+      },
+      tui: {
+        clearPrompt: () => Promise.resolve({ data: true }),
+        appendPrompt: (_input: unknown) => Promise.resolve({ data: true }),
+        submitPrompt: () => Promise.resolve({ data: true }),
+      },
+      session: {
+        create: (input?: unknown) => {
+          ops.push("create");
+          api.__test.sessionOps.push({ op: "create", payload: input });
+          return Promise.resolve({ data: { id: "session-created" } });
+        },
+        promptAsync: (input: unknown) => {
+          ops.push("promptAsync");
+          api.__test.sessionOps.push({ op: "promptAsync", payload: input });
+          return Promise.resolve({ data: true });
+        },
+      },
+      provider: {
+        oauth: {
+          authorize: () => {
+            ops.push("authorize");
+            return Promise.resolve({ data: { url: "https://example.com/auth", instructions: "Test", method: "manual" } });
+          },
+          callback: () => {
+            ops.push("callback");
+            return Promise.resolve({ data: true });
+          },
+        },
+      },
+    },
+  });
+  const lifecycle = { closed: false };
+
+  const dialog = SupabaseDialog({
+    api: api as never,
+    logger: createLogger(),
+    onClose: () => api.ui.dialog.clear(),
+    initialState: { type: "idle" },
+    lifecycle,
+  }) as { onConfirm?: () => Promise<void> };
+
+  await dialog.onConfirm?.();
+  await Promise.resolve();
+
+  // Session must be created and navigated BEFORE OAuth authorize runs
+  const createIdx = ops.indexOf("create");
+  const authorizeIdx = ops.indexOf("authorize");
+  expect(createIdx).toBeGreaterThan(-1);
+  expect(authorizeIdx).toBeGreaterThan(-1);
+  expect(createIdx).toBeLessThan(authorizeIdx);
+
+  expect(api.__test.routeOps).toEqual([
+    { op: "navigate", name: "session", params: { sessionID: "session-created" } },
+  ]);
+
+  expect(api.__test.sessionOps).toContainEqual(expect.objectContaining({
+    op: "promptAsync",
+    payload: expect.objectContaining({ sessionID: "session-created", noReply: true }),
+  }));
+});
+
+test("supabase already-connected confirm injects onboarding once", async () => {
+  const api = createDialogApi({
+    route: {
+      current: {
+        name: "session",
+        params: { sessionID: "session-current" },
+      },
+      navigate: () => undefined,
+    },
+  });
+  const lifecycle = { closed: false };
+
+  const firstDialog = SupabaseDialog({
+    api: api as never,
+    logger: createLogger(),
+    onClose: () => api.ui.dialog.clear(),
+    initialState: { type: "already_connected" },
+    lifecycle,
+  }) as { onConfirm?: () => Promise<void> };
+
+  await firstDialog.onConfirm?.();
+  lifecycle.closed = false;
+
+  const secondDialog = SupabaseDialog({
+    api: api as never,
+    logger: createLogger(),
+    onClose: () => api.ui.dialog.clear(),
+    initialState: { type: "already_connected" },
+    lifecycle,
+  }) as { onConfirm?: () => Promise<void> };
+
+  await secondDialog.onConfirm?.();
+
+  expect(api.__test.sessionOps.filter((op) => op.op === "promptAsync")).toHaveLength(1);
+});
+
+test("supabase already-connected confirm dedupes onboarding across dialog lifecycles", async () => {
+  const api = createDialogApi({
+    route: {
+      current: {
+        name: "session",
+        params: { sessionID: "session-current" },
+      },
+      navigate: () => undefined,
+    },
+  });
+
+  const firstDialog = SupabaseDialog({
+    api: api as never,
+    logger: createLogger(),
+    onClose: () => api.ui.dialog.clear(),
+    initialState: { type: "already_connected" },
+    lifecycle: { closed: false },
+  }) as { onConfirm?: () => Promise<void> };
+
+  await firstDialog.onConfirm?.();
+
+  const secondDialog = SupabaseDialog({
+    api: api as never,
+    logger: createLogger(),
+    onClose: () => api.ui.dialog.clear(),
+    initialState: { type: "already_connected" },
+    lifecycle: { closed: false },
+  }) as { onConfirm?: () => Promise<void> };
+
+  await secondDialog.onConfirm?.();
+
+  expect(api.__test.sessionOps.filter((op) => op.op === "promptAsync")).toHaveLength(1);
+});
+
+test("supabase disconnect does not inject onboarding", async () => {
+  const api = createDialogApi();
+
+  const dialog = SupabaseDialog({
+    api: api as never,
+    logger: createLogger(),
+    onClose: () => api.ui.dialog.clear(),
+    initialState: { type: "already_connected" },
+  }) as { onCancel?: () => Promise<void> };
+
+  await dialog.onCancel?.();
+
+  expect(api.__test.sessionOps).toEqual([]);
 });
 
 test("supabase auth preflight reports already connected when saved auth is still valid", async () => {
@@ -457,6 +720,7 @@ test("supabase dialog already connected offers disconnect action", async () => {
 
   expect(authorizeCalls).toEqual([{ providerID: "supabase", method: 1, inputs: { action: "disconnect" } }]);
   expect(api.__test.cleared).toBe(1);
+  expect(api.__test.toasts).toEqual([{ message: "Disconnected from Supabase" }]);
 });
 
 test("supabase dialog starts preflight only once while first check is pending", async () => {
@@ -813,6 +1077,7 @@ test("error retry starts fresh oauth without using stale url", async () => {
         submitPrompt: () => Promise.resolve({ data: true }),
       },
       session: {
+        create: () => Promise.resolve({ data: { id: "ses-retry" } }),
         promptAsync: () => Promise.resolve({ data: true }),
       },
       provider: {
