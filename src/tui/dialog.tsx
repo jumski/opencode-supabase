@@ -338,7 +338,14 @@ export function SupabaseDialog(props: SupabaseDialogProps) {
       logger: props.logger,
       setState,
       onSuccess: () => {
-        if (lifecycle.closed || lifecycle.dismissed) {
+        if (lifecycle.dismissed) {
+          props.api.ui.toast({
+            message: "Supabase connected. Run /supabase again to add onboarding to chat.",
+          });
+          return;
+        }
+
+        if (lifecycle.closed) {
           return;
         }
 
