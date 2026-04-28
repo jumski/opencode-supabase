@@ -339,7 +339,7 @@ test("supabase auth success injects ignored onboarding into current session", as
           expect.objectContaining({
             type: "text",
             ignored: true,
-            text: expect.stringContaining("What you can ask me to do now:"),
+            text: expect.stringContaining("list your Supabase organizations"),
           }),
         ],
       },

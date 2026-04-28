@@ -21,13 +21,11 @@ type SupabaseDialogProps = {
 const ONBOARDING_MESSAGE = `Supabase is connected.
 
 What you can ask me to do now:
-- list my Supabase projects
-- inspect a Supabase project
-- list tables and database schemas
-- check migrations and database changes
-- review RLS policies and security advisors
-- help build or debug Supabase features
-- explain how this app connects to Supabase
+- list your Supabase organizations
+- list your Supabase projects
+- get API keys for a project
+- list available database regions for an organization
+- create a new Supabase project
 
 Good first prompt:
 list my Supabase projects`;
