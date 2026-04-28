@@ -274,9 +274,12 @@ test("supabase dialog success shows example prompts and inserts on confirm", asy
     logger: createLogger(),
     onClose: () => api.ui.dialog.clear(),
     initialState: { type: "success" },
-  }) as { title?: string; onConfirm?: () => Promise<void> };
+  }) as { title?: string; message?: string; onConfirm?: () => Promise<void> };
 
   expect(successDialog.title).toBe("Connected to Supabase");
+  expect(successDialog.message).toBe(
+    "Your account is ready. Try asking:\n\n  list my Supabase projects\n  list my Supabase organizations\n  for organization <name>, list available regions\n\nHit Confirm to try it out",
+  );
 
   await successDialog.onConfirm?.();
 
@@ -446,7 +449,10 @@ test("supabase dialog already connected offers disconnect action", async () => {
     initialState: { type: "already_connected" },
   }) as { title?: string; message?: string; onCancel?: () => Promise<void> };
 
-  expect(dialog.title).toBe("Already connected to Supabase");
+  expect(dialog.title).toBe("You're all set");
+  expect(dialog.message).toBe(
+    "Your Supabase account is connected and ready to go.\n\nClose this dialog to continue, or disconnect to sign out.",
+  );
   await dialog.onCancel?.();
 
   expect(authorizeCalls).toEqual([{ providerID: "supabase", method: 1, inputs: { action: "disconnect" } }]);
@@ -517,7 +523,7 @@ test("supabase dialog starts preflight only once while first check is pending", 
   await Promise.resolve();
 
   expect(currentDialog).toMatchObject({
-    title: "Already connected to Supabase",
+    title: "You're all set",
   });
   expect(authorizeCalls).toBe(1);
 });
@@ -706,7 +712,8 @@ test("supabase dialog idle uses built in confirm dialog", () => {
   });
 
   expect(dialog).toMatchObject({
-    title: "Connect Supabase",
+    title: "Connect your Supabase account",
+    message: "Opens your browser to authorize OpenCode to access your Supabase account.",
   });
   expect(api.__test.dialogConfirms).toHaveLength(1);
   expect(api.__test.dialogs).toHaveLength(0);
@@ -722,7 +729,9 @@ test("supabase dialog waiting states use built in alert dialog", () => {
   });
 
   expect(waiting).toMatchObject({
-    title: "Connect Supabase",
+    title: "Connect to Supabase",
+    message:
+      "Complete authorization in your browser.\n\nIf the browser did not open, visit:\nhttps://example.com/auth\n\nWaiting for authorization...",
   });
   expect(api.__test.dialogAlerts).toHaveLength(1);
   expect(api.__test.dialogs).toHaveLength(0);
