@@ -321,7 +321,7 @@ test("supabase dialog does not inject onboarding after waiting dialog was dismis
   expect(api.__test.sessionOps.filter((op) => op.op === "promptAsync")).toHaveLength(0);
   expect(api.__test.toasts).toEqual([
     {
-      message: "Supabase connected. Run /supabase again to add onboarding to chat.",
+      message: "Supabase connected",
     },
   ]);
 });

@@ -340,7 +340,7 @@ export function SupabaseDialog(props: SupabaseDialogProps) {
       onSuccess: () => {
         if (lifecycle.dismissed) {
           props.api.ui.toast({
-            message: "Supabase connected. Run /supabase again to add onboarding to chat.",
+            message: "Supabase connected",
           });
           return;
         }
