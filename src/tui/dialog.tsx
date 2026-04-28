@@ -478,12 +478,9 @@ export function SupabaseDialog(props: SupabaseDialogProps) {
     });
   }
 
-  return props.api.ui.DialogConfirm({
+  return props.api.ui.DialogAlert({
     title: "Connected to Supabase",
     message: "Your account is ready. Close this dialog and ask me to list your Supabase projects.",
-    onConfirm: () => {
-      closeDialog();
-    },
-    onCancel: closeDialog,
+    onConfirm: closeDialog,
   });
 }
