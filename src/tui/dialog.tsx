@@ -20,14 +20,13 @@ type SupabaseDialogProps = {
 
 const ONBOARDING_MESSAGE = `Supabase is connected.
 
-What you can ask me to do now:
-- list your Supabase organizations
-- list your Supabase projects
-- get API keys for a project
-- list available database regions for an organization
-- create a new Supabase project
+You can ask me about:
+- your organizations and projects
+- API keys for a project
+- available database regions
+- creating a new project
 
-Good first prompt:
+Try this:
 list my Supabase projects`;
 
 const onboardedSessionIDsByApi = new WeakMap<TuiPluginApi, Set<string>>();
@@ -367,6 +366,7 @@ export function SupabaseDialog(props: SupabaseDialogProps) {
         method: 1,
         inputs: { action: "disconnect" },
       });
+      props.api.ui.toast({ message: "Disconnected from Supabase" });
       closeDialog();
     } catch (error) {
       await props.logger.warn("supabase disconnect failed", {

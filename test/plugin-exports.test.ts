@@ -339,7 +339,7 @@ test("supabase auth success injects ignored onboarding into current session", as
           expect.objectContaining({
             type: "text",
             ignored: true,
-            text: expect.stringContaining("list your Supabase organizations"),
+            text: expect.stringContaining("your organizations and projects"),
           }),
         ],
       },
@@ -663,6 +663,7 @@ test("supabase dialog already connected offers disconnect action", async () => {
 
   expect(authorizeCalls).toEqual([{ providerID: "supabase", method: 1, inputs: { action: "disconnect" } }]);
   expect(api.__test.cleared).toBe(1);
+  expect(api.__test.toasts).toEqual([{ message: "Disconnected from Supabase" }]);
 });
 
 test("supabase dialog starts preflight only once while first check is pending", async () => {
