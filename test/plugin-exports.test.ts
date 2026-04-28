@@ -344,7 +344,7 @@ test("supabase dialog success closes without inserting an example prompt", async
 
   expect(successDialog.title).toBe("Connected to Supabase");
   expect(successDialog.message).toBe(
-    "Your account is ready. Return to the current chat to pick a Supabase task when you're ready.",
+    "Your account is ready. Close this dialog and ask me to list your Supabase projects.",
   );
 
   await successDialog.onConfirm?.();
