@@ -338,6 +338,10 @@ export function SupabaseDialog(props: SupabaseDialogProps) {
       logger: props.logger,
       setState,
       onSuccess: () => {
+        if (lifecycle.closed || lifecycle.dismissed) {
+          return;
+        }
+
         return injectOnboardingPrompt(props.api, props.logger, lifecycle);
       },
     });
@@ -469,8 +473,7 @@ export function SupabaseDialog(props: SupabaseDialogProps) {
 
   return props.api.ui.DialogConfirm({
     title: "Connected to Supabase",
-    message:
-      "Your account is ready. I added next steps to the current chat so you can pick a Supabase task from there.",
+    message: "Your account is ready. Return to the current chat to pick a Supabase task when you're ready.",
     onConfirm: () => {
       closeDialog();
     },

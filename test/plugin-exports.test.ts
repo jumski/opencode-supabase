@@ -240,35 +240,85 @@ test("tui plugin registers /supabase and opens a closable dialog", async () => {
   expect(cleared).toBe(0);
 });
 
-test("supabase dialog success is silent when waiting dialog was dismissed", async () => {
-  const api = createDialogApi();
+test("supabase dialog does not inject onboarding after waiting dialog was dismissed", async () => {
+  let currentDialog: unknown;
+  let releaseCallback!: () => void;
+
+  const api = createDialogApi({
+    route: {
+      current: {
+        name: "session",
+        params: { sessionID: "session-current" },
+      },
+      navigate: () => undefined,
+    },
+    ui: {
+      Dialog: (input: unknown) => input,
+      DialogAlert: (input: unknown) => {
+        currentDialog = input;
+        return input;
+      },
+      DialogConfirm: (input: unknown) => {
+        currentDialog = input;
+        return input;
+      },
+      toast: (input: { variant?: string; message: string }) => {
+        api.__test.toasts.push(input);
+      },
+      dialog: {
+        replace: (factory: () => unknown) => {
+          currentDialog = factory();
+        },
+        clear: () => undefined,
+      },
+    },
+    client: {
+      app: {
+        log: (_input: unknown) => Promise.resolve(true),
+      },
+      tui: {
+        clearPrompt: () => Promise.resolve({ data: true }),
+        appendPrompt: (_input: unknown) => Promise.resolve({ data: true }),
+        submitPrompt: () => Promise.resolve({ data: true }),
+      },
+      session: {
+        promptAsync: (input: unknown) => {
+          api.__test.sessionOps.push({ op: "promptAsync", payload: input });
+          return Promise.resolve({ data: true });
+        },
+      },
+      provider: {
+        oauth: {
+          authorize: () => Promise.resolve({ data: { url: "https://example.com/auth", instructions: "Test", method: "manual" } }),
+          callback: () =>
+            new Promise((resolve) => {
+              releaseCallback = () => resolve({ data: true });
+            }),
+        },
+      },
+    },
+  });
   const lifecycle = { closed: false, dismissed: false };
 
   const dialog = SupabaseDialog({
     api: api as never,
     logger: createLogger(),
     onClose: () => api.ui.dialog.clear(),
-    initialState: { type: "waiting_callback", url: "https://example.com/auth" },
+    initialState: { type: "idle" },
     lifecycle,
-  });
+  }) as { onConfirm?: () => Promise<void> };
 
-  // Trigger the waiting dialog's onConfirm (dismiss)
-  const waitingDialog = api.__test.dialogAlerts[0] as { onConfirm?: () => void };
-  waitingDialog?.onConfirm?.();
+  const authPromise = dialog.onConfirm?.();
+  await new Promise((resolve) => setTimeout(resolve, 0));
 
-  expect(api.__test.cleared).toBe(1);
+  expect(currentDialog).toMatchObject({ title: "Connect to Supabase" });
+  (currentDialog as { onConfirm?: () => void }).onConfirm?.();
   expect(lifecycle.dismissed).toBe(true);
 
-  // Now simulate success state transition through setState
-  // Since lifecycle is closed and dismissed, setState should not replace dialog
-  const initialConfirmCount = api.__test.dialogConfirms.length;
+  releaseCallback();
+  await authPromise;
 
-  // Manually invoke what setState would do (it checks lifecycle.closed internally)
-  // Since lifecycle.closed = true, setState would return early and do nothing
-  expect(lifecycle.closed).toBe(true);
-
-  // Verify no additional dialogs were created
-  expect(api.__test.dialogConfirms).toHaveLength(initialConfirmCount);
+  expect(api.__test.sessionOps.filter((op) => op.op === "promptAsync")).toHaveLength(0);
   expect(api.__test.toasts).toEqual([]);
 });
 
@@ -294,7 +344,7 @@ test("supabase dialog success closes without inserting an example prompt", async
 
   expect(successDialog.title).toBe("Connected to Supabase");
   expect(successDialog.message).toBe(
-    "Your account is ready. I added next steps to the current chat so you can pick a Supabase task from there.",
+    "Your account is ready. Return to the current chat to pick a Supabase task when you're ready.",
   );
 
   await successDialog.onConfirm?.();
