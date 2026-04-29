@@ -88,7 +88,10 @@ function getErrorMessage(error: unknown) {
 }
 
 function getDialogTheme(api: TuiPluginApi): DialogTheme {
-  return ((api as { theme?: { current?: DialogTheme } }).theme?.current ?? FALLBACK_THEME) as DialogTheme;
+  return {
+    ...FALLBACK_THEME,
+    ...((api as { theme?: { current?: Partial<DialogTheme> } }).theme?.current ?? {}),
+  } as DialogTheme;
 }
 
 function createMarkdownSyntax(theme: DialogTheme) {
