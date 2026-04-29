@@ -44,6 +44,7 @@ function createDialogApi(overrides?: Record<string, unknown>) {
   const promptOps: Array<{ op: string; payload?: unknown }> = [];
   const sessionOps: Array<{ op: string; payload?: unknown }> = [];
   const routeOps: Array<{ op: string; name: string; params?: unknown }> = [];
+  const setSizes: string[] = [];
   let openCalls: string[] = [];
 
   const api = {
@@ -77,6 +78,9 @@ function createDialogApi(overrides?: Record<string, unknown>) {
         },
         clear: () => {
           cleared += 1;
+        },
+        setSize: (size: string) => {
+          setSizes.push(size);
         },
       },
     },
@@ -123,6 +127,7 @@ function createDialogApi(overrides?: Record<string, unknown>) {
       promptOps,
       sessionOps,
       routeOps,
+      setSizes,
       get cleared() {
         return cleared;
       },
@@ -147,6 +152,7 @@ function createDialogApi(overrides?: Record<string, unknown>) {
       promptOps: Array<{ op: string; payload?: unknown }>;
       sessionOps: Array<{ op: string; payload?: unknown }>;
       routeOps: Array<{ op: string; name: string; params?: unknown }>;
+      setSizes: string[];
       cleared: number;
       replaced: number;
       openCalls: string[];
@@ -166,7 +172,7 @@ test("supabase command exposes the expected slash metadata", () => {
     opened += 1;
   });
 
-  expect(command?.title).toBe("Connect Supabase");
+  expect(command?.title).toBe("Connect to Supabase");
   expect(command?.value).toBe("supabase.connect");
   expect(command?.slash).toEqual({ name: "supabase" });
 
@@ -181,6 +187,7 @@ test("tui plugin registers /supabase and opens a closable dialog", async () => {
   let replaceFactory: (() => unknown) | undefined;
   let cleared = 0;
   let usedCustomDialog = false;
+  const setSizes: string[] = [];
 
   await tuiModule.tui(
     {
@@ -203,6 +210,9 @@ test("tui plugin registers /supabase and opens a closable dialog", async () => {
           },
           clear: () => {
             cleared += 1;
+          },
+          setSize: (size: string) => {
+            setSizes.push(size);
           },
         },
         toast: () => {},
@@ -232,16 +242,16 @@ test("tui plugin registers /supabase and opens a closable dialog", async () => {
   expect(typeof replaceFactory).toBe("function");
 
   expect(typeof replaceFactory).toBe("function");
-  const rendered = replaceFactory?.() as { title?: string; message?: string };
-  expect(rendered).toMatchObject({
-    title: "Connect Supabase",
-  });
+  const rendered = replaceFactory?.();
+  expect(typeof rendered).toBe("function");
+  expect(setSizes).toEqual(["medium"]);
   expect(usedCustomDialog).toBe(false);
   expect(cleared).toBe(0);
 });
 
-test("supabase dialog does not inject onboarding after waiting dialog was dismissed", async () => {
+test("supabase dialog shows toast without onboarding after waiting dialog was dismissed", async () => {
   let currentDialog: unknown;
+  let currentDialogOnClose: (() => void) | undefined;
   let releaseCallback!: () => void;
 
   const api = createDialogApi({
@@ -266,10 +276,14 @@ test("supabase dialog does not inject onboarding after waiting dialog was dismis
         api.__test.toasts.push(input);
       },
       dialog: {
-        replace: (factory: () => unknown) => {
+        replace: (factory: () => unknown, onClose?: () => void) => {
           currentDialog = factory();
+          currentDialogOnClose = onClose;
         },
         clear: () => undefined,
+        setSize: (size: string) => {
+          api.__test.setSizes.push(size);
+        },
       },
     },
     client: {
@@ -311,19 +325,44 @@ test("supabase dialog does not inject onboarding after waiting dialog was dismis
   const authPromise = dialog.onConfirm?.();
   await new Promise((resolve) => setTimeout(resolve, 0));
 
-  expect(currentDialog).toMatchObject({ title: "Connect to Supabase" });
-  (currentDialog as { onConfirm?: () => void }).onConfirm?.();
+  expect(api.__test.setSizes).toContain("large");
+  expect(api.__test.dialogs).toHaveLength(0);
+  expect(currentDialog).toBeDefined();
+  ((currentDialog as { onClose?: () => void }).onClose ?? currentDialogOnClose)?.();
   expect(lifecycle.dismissed).toBe(true);
 
   releaseCallback();
   await authPromise;
 
   expect(api.__test.sessionOps.filter((op) => op.op === "promptAsync")).toHaveLength(0);
-  expect(api.__test.toasts).toEqual([
-    {
-      message: "Supabase connected",
+  expect(api.__test.toasts).toEqual([{ message: "Supabase connected" }]);
+});
+
+test("supabase auth retry clears dismissed state", async () => {
+  const api = createDialogApi({
+    route: {
+      current: {
+        name: "session",
+        params: { sessionID: "session-current" },
+      },
+      navigate: () => undefined,
     },
-  ]);
+  });
+  const lifecycle = { closed: false, dismissed: true };
+
+  const dialog = SupabaseDialog({
+    api: api as never,
+    logger: createLogger(),
+    onClose: () => api.ui.dialog.clear(),
+    initialState: { type: "idle" },
+    lifecycle,
+  }) as { onConfirm?: () => Promise<void> };
+
+  await dialog.onConfirm?.();
+
+  expect(lifecycle.dismissed).toBe(false);
+  expect(api.__test.toasts).toEqual([]);
+  expect(api.__test.sessionOps.filter((op) => op.op === "promptAsync")).toHaveLength(1);
 });
 
 test("supabase dialog success closes without inserting an example prompt", async () => {
@@ -733,12 +772,13 @@ test("supabase dialog starts preflight only once while first check is pending", 
       DialogAlert: (input: unknown) => input,
       DialogConfirm: (input: unknown) => input,
       toast: (_input: { variant?: string; message: string }) => undefined,
-      dialog: {
-        replace: (factory: () => unknown) => {
-          currentDialog = factory();
+        dialog: {
+          replace: (factory: () => unknown) => {
+            currentDialog = factory();
+          },
+          clear: () => undefined,
+          setSize: () => undefined,
         },
-        clear: () => undefined,
-      },
     },
     client: {
       app: {
@@ -815,6 +855,7 @@ test("tui plugin reusing the original /supabase dialog factory should not start 
             replaceFactory = factory;
           },
           clear: () => {},
+          setSize: () => {},
         },
         toast: () => {},
       },
@@ -951,7 +992,7 @@ test("supabase dialog unknown state offers retry and continue", async () => {
   expect(typeof dialog.onCancel).toBe("function");
 });
 
-test("supabase dialog starts with built in checking alert", () => {
+test("supabase dialog starts with custom checking spinner dialog", () => {
   const api = createDialogApi();
   const dialog = SupabaseDialog({
     api: api as never,
@@ -959,11 +1000,10 @@ test("supabase dialog starts with built in checking alert", () => {
     onClose: () => api.ui.dialog.clear(),
   });
 
-  expect(dialog).toMatchObject({
-    title: "Connect Supabase",
-  });
-  expect(api.__test.dialogAlerts).toHaveLength(1);
+  expect(typeof dialog).toBe("function");
+  expect(api.__test.dialogAlerts).toHaveLength(0);
   expect(api.__test.dialogs).toHaveLength(0);
+  expect(api.__test.setSizes).toEqual(["medium"]);
 });
 
 test("supabase dialog idle uses built in confirm dialog", () => {
@@ -977,13 +1017,13 @@ test("supabase dialog idle uses built in confirm dialog", () => {
 
   expect(dialog).toMatchObject({
     title: "Connect your Supabase account",
-    message: "Opens your browser to authorize OpenCode to access your Supabase account.",
+    message: "Open your browser to authorize OpenCode to access your Supabase account.",
   });
   expect(api.__test.dialogConfirms).toHaveLength(1);
   expect(api.__test.dialogs).toHaveLength(0);
 });
 
-test("supabase dialog waiting states use built in alert dialog", () => {
+test("supabase dialog waiting states use custom spinner dialog", () => {
   const api = createDialogApi();
   const waiting = SupabaseDialog({
     api: api as never,
@@ -992,13 +1032,10 @@ test("supabase dialog waiting states use built in alert dialog", () => {
     initialState: { type: "waiting_callback", url: "https://example.com/auth" },
   });
 
-  expect(waiting).toMatchObject({
-    title: "Connect to Supabase",
-    message:
-      "Complete authorization in your browser.\n\nIf the browser did not open, visit:\nhttps://example.com/auth\n\nWaiting for authorization...",
-  });
-  expect(api.__test.dialogAlerts).toHaveLength(1);
+  expect(typeof waiting).toBe("function");
+  expect(api.__test.dialogAlerts).toHaveLength(0);
   expect(api.__test.dialogs).toHaveLength(0);
+  expect(api.__test.setSizes).toEqual(["large"]);
 });
 
 test("supabase auth flow enters waiting state before callback resolves", async () => {

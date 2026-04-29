@@ -1,5 +1,7 @@
 import type { TuiPluginApi } from "@opencode-ai/plugin/tui";
-import { createSignal } from "solid-js";
+import { RGBA, SyntaxStyle, TextAttributes } from "@opentui/core";
+import { createSignal, onCleanup } from "solid-js";
+import type { JSX } from "solid-js";
 
 import { formatAuthError } from "../shared/auth-errors.ts";
 import type { SupabaseLogger } from "../shared/log.ts";
@@ -61,8 +63,110 @@ type AuthFlowContext = {
   onSuccess: () => void | Promise<void>;
 };
 
+const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+
+const FALLBACK_THEME = {
+  primary: RGBA.fromHex("#347d95"),
+  selectedListItemText: RGBA.fromHex("#ffffff"),
+  text: RGBA.fromHex("#f8f5ea"),
+  textMuted: RGBA.fromHex("#9f97aa"),
+  backgroundPanel: RGBA.fromHex("#f8f5ea"),
+  markdownText: RGBA.fromHex("#5f5875"),
+  markdownHeading: RGBA.fromHex("#5f5875"),
+  markdownLink: RGBA.fromHex("#347d95"),
+  markdownStrong: RGBA.fromHex("#5f5875"),
+  markdownEmph: RGBA.fromHex("#8a6f00"),
+  markdownCode: RGBA.fromHex("#2e7d32"),
+  markdownListItem: RGBA.fromHex("#347d95"),
+  markdownBlockQuote: RGBA.fromHex("#8a6f00"),
+};
+
+type DialogTheme = typeof FALLBACK_THEME;
+
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
+}
+
+function getDialogTheme(api: TuiPluginApi): DialogTheme {
+  return {
+    ...FALLBACK_THEME,
+    ...((api as { theme?: { current?: Partial<DialogTheme> } }).theme?.current ?? {}),
+  } as DialogTheme;
+}
+
+function createMarkdownSyntax(theme: DialogTheme) {
+  return SyntaxStyle.fromTheme([
+    { scope: ["markup.heading"], style: { foreground: theme.markdownHeading, bold: true } },
+    { scope: ["markup.bold", "markup.strong"], style: { foreground: theme.markdownStrong, bold: true } },
+    { scope: ["markup.italic"], style: { foreground: theme.markdownEmph, italic: true } },
+    { scope: ["markup.raw", "markup.raw.block", "markup.raw.inline"], style: { foreground: theme.markdownCode } },
+    { scope: ["markup.link", "markup.link.url"], style: { foreground: theme.markdownLink, underline: true } },
+    { scope: ["markup.list"], style: { foreground: theme.markdownListItem } },
+    { scope: ["markup.quote"], style: { foreground: theme.markdownBlockQuote, italic: true } },
+    { scope: ["conceal"], style: { foreground: theme.textMuted } },
+  ]);
+}
+
+function SpinnerLabel(props: { text: string; color: DialogTheme["textMuted"] }) {
+  const [frame, setFrame] = createSignal(0);
+  const interval = setInterval(() => {
+    setFrame((index) => (index + 1) % SPINNER_FRAMES.length);
+  }, 80).unref();
+
+  onCleanup(() => clearInterval(interval));
+
+  return (
+    <box flexDirection="row" gap={1}>
+      <text fg={props.color}>{SPINNER_FRAMES[frame()]}</text>
+      <text fg={props.color}>{props.text}</text>
+    </box>
+  );
+}
+
+function SupabaseSpinnerDialog(props: {
+  api: TuiPluginApi;
+  title: string;
+  status: string;
+  body?: string;
+  dismissible?: boolean;
+  size?: "medium" | "large" | "xlarge";
+  onClose: () => void;
+}): JSX.Element {
+  const theme = getDialogTheme(props.api);
+  const syntax = createMarkdownSyntax(theme);
+  props.api.ui.dialog.setSize(props.size ?? "medium");
+
+  return Object.assign(() => (
+    <box paddingLeft={2} paddingRight={2} gap={1} paddingBottom={1}>
+      <box flexDirection="row" justifyContent="space-between">
+        <text attributes={TextAttributes.BOLD} fg={theme.text}>
+          {props.title}
+        </text>
+        {props.dismissible ? (
+          <text fg={theme.textMuted} onMouseUp={props.onClose}>
+            esc
+          </text>
+        ) : (
+          <text fg={theme.textMuted}> </text>
+        )}
+      </box>
+      <box paddingTop={1} paddingBottom={props.body ? 0 : 1}>
+        <SpinnerLabel text={props.status} color={theme.textMuted} />
+      </box>
+      {props.body ? (
+        <box paddingBottom={props.dismissible ? 0 : 1}>
+          <markdown content={props.body} syntaxStyle={syntax} fg={theme.markdownText} bg={theme.backgroundPanel} />
+        </box>
+      ) : undefined}
+      {props.dismissible ? (
+        <box flexDirection="row" justifyContent="flex-end" paddingTop={1}>
+          <box paddingLeft={3} paddingRight={3} backgroundColor={theme.primary} onMouseUp={props.onClose}>
+            <text fg={theme.selectedListItemText}>Dismiss</text>
+          </box>
+        </box>
+      ) : undefined}
+    </box>
+  ), { onClose: props.dismissible ? props.onClose : () => undefined });
 }
 
 function parseAuthStatus(instructions: string): AuthStatus {
@@ -307,7 +411,6 @@ export function SupabaseDialog(props: SupabaseDialogProps) {
 
     if (nextState.type === "success") {
       if (lifecycle.dismissed) {
-        // User dismissed waiting dialog; stay silent
         return;
       }
       props.api.ui.dialog.replace(() =>
@@ -330,6 +433,7 @@ export function SupabaseDialog(props: SupabaseDialogProps) {
   };
 
   const startOAuth = async () => {
+    lifecycle.dismissed = false;
     if (!lifecycle.chatSessionID) {
       lifecycle.chatSessionID = await ensureChatSession(props.api);
     }
@@ -339,9 +443,7 @@ export function SupabaseDialog(props: SupabaseDialogProps) {
       setState,
       onSuccess: () => {
         if (lifecycle.dismissed) {
-          props.api.ui.toast({
-            message: "Supabase connected",
-          });
+          props.api.ui.toast({ message: "Supabase connected" });
           return;
         }
 
@@ -400,17 +502,19 @@ export function SupabaseDialog(props: SupabaseDialogProps) {
       void retryPreflight();
     });
 
-    return props.api.ui.DialogAlert({
-      title: "Connect Supabase",
-      message: "Checking Supabase connection...",
-      onConfirm: () => closeDialog(true),
+    return SupabaseSpinnerDialog({
+      api: props.api,
+      title: "Connect to Supabase",
+      status: "Checking Supabase connection...",
+      body: "No action needed. This should only take a few seconds.",
+      onClose: () => undefined,
     });
   }
 
   if (currentState.type === "idle") {
     return props.api.ui.DialogConfirm({
       title: "Connect your Supabase account",
-      message: "Opens your browser to authorize OpenCode to access your Supabase account.",
+      message: "Open your browser to authorize OpenCode to access your Supabase account.",
       onConfirm: startOAuth,
       onCancel: closeDialog,
     });
@@ -418,25 +522,36 @@ export function SupabaseDialog(props: SupabaseDialogProps) {
 
   if (currentState.type === "authorizing") {
     if (!currentState.url) {
-    return props.api.ui.DialogAlert({
-      title: "Connect Supabase",
-      message: "Starting authorization...",
-      onConfirm: () => closeDialog(true),
-    });
+      return SupabaseSpinnerDialog({
+        api: props.api,
+        title: "Connect to Supabase",
+        status: "Starting authorization...",
+        body: "Opening your browser. You can close this dialog; auth completes only after browser approval.",
+        dismissible: true,
+        onClose: () => closeDialog(true),
+      });
     }
 
-    return props.api.ui.DialogAlert({
+    return SupabaseSpinnerDialog({
+      api: props.api,
       title: "Connect to Supabase",
-      message: `Complete authorization in your browser.\n\nIf the browser did not open, visit:\n${currentState.url}\n\nWaiting for authorization...`,
-      onConfirm: () => closeDialog(true),
+      status: "Waiting for browser authorization...",
+      body: `Complete authorization in your browser.\n\nIf the browser did not open, visit:\n${currentState.url}\n\nYou can close this dialog; auth completes only after browser approval.`,
+      dismissible: true,
+      size: "large",
+      onClose: () => closeDialog(true),
     });
   }
 
   if (currentState.type === "waiting_callback") {
-    return props.api.ui.DialogAlert({
+    return SupabaseSpinnerDialog({
+      api: props.api,
       title: "Connect to Supabase",
-      message: `Complete authorization in your browser.\n\nIf the browser did not open, visit:\n${currentState.url}\n\nWaiting for authorization...`,
-      onConfirm: () => closeDialog(true),
+      status: "Waiting for browser authorization...",
+      body: `Complete authorization in your browser.\n\nIf the browser did not open, visit:\n${currentState.url}\n\nYou can close this dialog; auth completes only after browser approval.`,
+      dismissible: true,
+      size: "large",
+      onClose: () => closeDialog(true),
     });
   }
 

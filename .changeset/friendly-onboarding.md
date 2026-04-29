@@ -4,6 +4,6 @@
 
 ## UI Improvements
 
-- **Friendlier onboarding text**: Simplified post-auth chat onboarding message to be more concise and less formal.
-- **Dismissed OAuth feedback**: Show a confirmation toast when OAuth succeeds after the user dismissed the waiting dialog.
-- **Success dialog single OK button**: Changed success state from DialogConfirm (Cancel/Confirm) to DialogAlert (single OK) for cleaner UX.
+- **Supabase auth progress**: Replaced static auth checks with an animated spinner dialog, markdown instructions, and clearer "No action needed" preflight copy.
+- **OAuth dismiss behavior**: Renamed in-progress auth action to `Dismiss`. Dismiss closes only the dialog; browser approval can still complete auth and show the success toast.
+- **Connection flow polish**: Unified "Connect to Supabase" titles, shortened browser approval copy, simplified post-auth onboarding, and replaced the success dialog with a single OK action.
