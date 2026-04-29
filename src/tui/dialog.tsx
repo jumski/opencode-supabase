@@ -501,9 +501,9 @@ export function SupabaseDialog(props: SupabaseDialogProps) {
 
     return SupabaseSpinnerDialog({
       api: props.api,
-      title: "Connect Supabase",
+      title: "Connect to Supabase",
       status: "Checking Supabase connection...",
-      body: "Let this run. It should only take a few seconds.",
+      body: "No action needed. This should only take a few seconds.",
       onClose: () => undefined,
     });
   }
@@ -511,7 +511,7 @@ export function SupabaseDialog(props: SupabaseDialogProps) {
   if (currentState.type === "idle") {
     return props.api.ui.DialogConfirm({
       title: "Connect your Supabase account",
-      message: "Opens your browser to authorize OpenCode to access your Supabase account.",
+      message: "Open your browser to authorize OpenCode to access your Supabase account.",
       onConfirm: startOAuth,
       onCancel: closeDialog,
     });
@@ -521,9 +521,9 @@ export function SupabaseDialog(props: SupabaseDialogProps) {
     if (!currentState.url) {
       return SupabaseSpinnerDialog({
         api: props.api,
-        title: "Connect Supabase",
+        title: "Connect to Supabase",
         status: "Starting authorization...",
-        body: "Opening your browser. You can close this dialog; authorization only completes if you approve in browser.",
+        body: "Opening your browser. You can close this dialog; auth completes only after browser approval.",
         dismissible: true,
         onClose: () => closeDialog(true),
       });
@@ -533,7 +533,7 @@ export function SupabaseDialog(props: SupabaseDialogProps) {
       api: props.api,
       title: "Connect to Supabase",
       status: "Waiting for browser authorization...",
-      body: `Complete authorization in your browser.\n\nIf the browser did not open, visit:\n${currentState.url}\n\nYou can close this dialog; authorization only completes if you approve in browser.`,
+      body: `Complete authorization in your browser.\n\nIf the browser did not open, visit:\n${currentState.url}\n\nYou can close this dialog; auth completes only after browser approval.`,
       dismissible: true,
       size: "large",
       onClose: () => closeDialog(true),
@@ -544,8 +544,8 @@ export function SupabaseDialog(props: SupabaseDialogProps) {
     return SupabaseSpinnerDialog({
       api: props.api,
       title: "Connect to Supabase",
-      status: "Waiting for authorization...",
-      body: `Complete authorization in your browser.\n\nIf the browser did not open, visit:\n${currentState.url}\n\nYou can close this dialog; authorization only completes if you approve in browser.`,
+      status: "Waiting for browser authorization...",
+      body: `Complete authorization in your browser.\n\nIf the browser did not open, visit:\n${currentState.url}\n\nYou can close this dialog; auth completes only after browser approval.`,
       dismissible: true,
       size: "large",
       onClose: () => closeDialog(true),

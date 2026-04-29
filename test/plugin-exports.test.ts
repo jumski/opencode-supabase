@@ -172,7 +172,7 @@ test("supabase command exposes the expected slash metadata", () => {
     opened += 1;
   });
 
-  expect(command?.title).toBe("Connect Supabase");
+  expect(command?.title).toBe("Connect to Supabase");
   expect(command?.value).toBe("supabase.connect");
   expect(command?.slash).toEqual({ name: "supabase" });
 
@@ -1017,7 +1017,7 @@ test("supabase dialog idle uses built in confirm dialog", () => {
 
   expect(dialog).toMatchObject({
     title: "Connect your Supabase account",
-    message: "Opens your browser to authorize OpenCode to access your Supabase account.",
+    message: "Open your browser to authorize OpenCode to access your Supabase account.",
   });
   expect(api.__test.dialogConfirms).toHaveLength(1);
   expect(api.__test.dialogs).toHaveLength(0);
