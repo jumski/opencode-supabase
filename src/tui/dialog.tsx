@@ -158,7 +158,7 @@ function SupabaseSpinnerDialog(props: {
       {props.dismissible ? (
         <box flexDirection="row" justifyContent="flex-end" paddingTop={1}>
           <box paddingLeft={3} paddingRight={3} backgroundColor={theme.primary} onMouseUp={props.onClose}>
-            <text fg={theme.selectedListItemText}>Cancel</text>
+            <text fg={theme.selectedListItemText}>Dismiss</text>
           </box>
         </box>
       ) : undefined}
@@ -408,7 +408,6 @@ export function SupabaseDialog(props: SupabaseDialogProps) {
 
     if (nextState.type === "success") {
       if (lifecycle.dismissed) {
-        // User dismissed waiting dialog; stay silent
         return;
       }
       props.api.ui.dialog.replace(() =>
@@ -431,6 +430,7 @@ export function SupabaseDialog(props: SupabaseDialogProps) {
   };
 
   const startOAuth = async () => {
+    lifecycle.dismissed = false;
     if (!lifecycle.chatSessionID) {
       lifecycle.chatSessionID = await ensureChatSession(props.api);
     }
@@ -440,9 +440,7 @@ export function SupabaseDialog(props: SupabaseDialogProps) {
       setState,
       onSuccess: () => {
         if (lifecycle.dismissed) {
-          props.api.ui.toast({
-            message: "Supabase connected",
-          });
+          props.api.ui.toast({ message: "Supabase connected" });
           return;
         }
 
@@ -525,7 +523,7 @@ export function SupabaseDialog(props: SupabaseDialogProps) {
         api: props.api,
         title: "Connect Supabase",
         status: "Starting authorization...",
-        body: "Opening your browser. Let this run for a few seconds.",
+        body: "Opening your browser. You can close this dialog; authorization only completes if you approve in browser.",
         dismissible: true,
         onClose: () => closeDialog(true),
       });
@@ -535,7 +533,7 @@ export function SupabaseDialog(props: SupabaseDialogProps) {
       api: props.api,
       title: "Connect to Supabase",
       status: "Waiting for browser authorization...",
-      body: `Complete authorization in your browser.\n\nIf the browser did not open, visit:\n${currentState.url}\n\nLet this run after approval; it should only take a few seconds.`,
+      body: `Complete authorization in your browser.\n\nIf the browser did not open, visit:\n${currentState.url}\n\nYou can close this dialog; authorization only completes if you approve in browser.`,
       dismissible: true,
       size: "large",
       onClose: () => closeDialog(true),
@@ -547,7 +545,7 @@ export function SupabaseDialog(props: SupabaseDialogProps) {
       api: props.api,
       title: "Connect to Supabase",
       status: "Waiting for authorization...",
-      body: `Complete authorization in your browser.\n\nIf the browser did not open, visit:\n${currentState.url}\n\nLet this run after approval; it should only take a few seconds.`,
+      body: `Complete authorization in your browser.\n\nIf the browser did not open, visit:\n${currentState.url}\n\nYou can close this dialog; authorization only completes if you approve in browser.`,
       dismissible: true,
       size: "large",
       onClose: () => closeDialog(true),

@@ -249,8 +249,9 @@ test("tui plugin registers /supabase and opens a closable dialog", async () => {
   expect(cleared).toBe(0);
 });
 
-test("supabase dialog does not inject onboarding after waiting dialog was dismissed", async () => {
+test("supabase dialog shows toast without onboarding after waiting dialog was dismissed", async () => {
   let currentDialog: unknown;
+  let currentDialogOnClose: (() => void) | undefined;
   let releaseCallback!: () => void;
 
   const api = createDialogApi({
@@ -274,15 +275,16 @@ test("supabase dialog does not inject onboarding after waiting dialog was dismis
       toast: (input: { variant?: string; message: string }) => {
         api.__test.toasts.push(input);
       },
-        dialog: {
-          replace: (factory: () => unknown) => {
-            currentDialog = factory();
-          },
-          clear: () => undefined,
-          setSize: (size: string) => {
-            api.__test.setSizes.push(size);
-          },
+      dialog: {
+        replace: (factory: () => unknown, onClose?: () => void) => {
+          currentDialog = factory();
+          currentDialogOnClose = onClose;
         },
+        clear: () => undefined,
+        setSize: (size: string) => {
+          api.__test.setSizes.push(size);
+        },
+      },
     },
     client: {
       app: {
@@ -325,18 +327,42 @@ test("supabase dialog does not inject onboarding after waiting dialog was dismis
 
   expect(api.__test.setSizes).toContain("large");
   expect(api.__test.dialogs).toHaveLength(0);
-  (currentDialog as { onClose?: () => void }).onClose?.();
+  expect(currentDialog).toBeDefined();
+  ((currentDialog as { onClose?: () => void }).onClose ?? currentDialogOnClose)?.();
   expect(lifecycle.dismissed).toBe(true);
 
   releaseCallback();
   await authPromise;
 
   expect(api.__test.sessionOps.filter((op) => op.op === "promptAsync")).toHaveLength(0);
-  expect(api.__test.toasts).toEqual([
-    {
-      message: "Supabase connected",
+  expect(api.__test.toasts).toEqual([{ message: "Supabase connected" }]);
+});
+
+test("supabase auth retry clears dismissed state", async () => {
+  const api = createDialogApi({
+    route: {
+      current: {
+        name: "session",
+        params: { sessionID: "session-current" },
+      },
+      navigate: () => undefined,
     },
-  ]);
+  });
+  const lifecycle = { closed: false, dismissed: true };
+
+  const dialog = SupabaseDialog({
+    api: api as never,
+    logger: createLogger(),
+    onClose: () => api.ui.dialog.clear(),
+    initialState: { type: "idle" },
+    lifecycle,
+  }) as { onConfirm?: () => Promise<void> };
+
+  await dialog.onConfirm?.();
+
+  expect(lifecycle.dismissed).toBe(false);
+  expect(api.__test.toasts).toEqual([]);
+  expect(api.__test.sessionOps.filter((op) => op.op === "promptAsync")).toHaveLength(1);
 });
 
 test("supabase dialog success closes without inserting an example prompt", async () => {
