@@ -19,9 +19,9 @@ Use this reference when implementing or reviewing authenticated Supabase API too
 
 ## Bundled Supabase Skills
 
-`skills/` contains real vendored files synced from `supabase/agent-skills` release tarballs.
+`skills/` contains real vendored files synced from `supabase/agent-skills` at a pinned commit.
 
 - Do not replace `skills/` with a symlink or submodule.
 - Do not fetch skills during plugin startup, normal build, or release artifact generation.
-- Use `bun run skills:sync` to update vendored skills.
+- Use `bun run skills:sync <commit-sha>` to update vendored skills.
 - Review skill diffs and `skills/.upstream.json` before release.
