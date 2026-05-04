@@ -20,6 +20,56 @@ Launch `opencode` in your project, then run:
 
 Connect your account and ask your agent about Supabase capabilities.
 
+## Bundled Supabase Skills
+
+`opencode-supabase` ships the official Supabase agent skills by default:
+
+- `supabase`
+- `supabase-postgres-best-practices`
+
+No separate `skills` CLI setup is required. Installing the plugin makes these skills available to OpenCode through the plugin server config hook.
+
+### Disable Bundled Skills
+
+If you want Supabase tools without bundled skills, disable them in plugin options:
+
+```json
+{
+  "plugin": [
+    ["opencode-supabase", { "skills": false }]
+  ]
+}
+```
+
+### Select Individual Skills
+
+Per-skill config is a partial override. Omitted skills stay enabled.
+
+```json
+{
+  "plugin": [
+    ["opencode-supabase", {
+      "skills": {
+        "supabase-postgres-best-practices": false
+      }
+    }]
+  ]
+}
+```
+
+### Maintainer Skill Sync
+
+Bundled skills are vendored as real files under `skills/` from `supabase/agent-skills` GitHub release assets.
+
+```bash
+bun run skills:sync
+bun run typecheck
+bun test
+bun run verify:pack
+```
+
+Review the generated diff before releasing.
+
 ## OAuth Callback Contract
 
 Plugin uses fixed localhost callback window for browser auth:

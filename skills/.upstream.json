@@ -1,0 +1,15 @@
+{
+  "source_repo": "supabase/agent-skills",
+  "source_release": null,
+  "source_version": null,
+  "source_commit": null,
+  "synced_at": null,
+  "managed_paths": [
+    "skills/supabase",
+    "skills/supabase-postgres-best-practices"
+  ],
+  "assets": [
+    "supabase.tar.gz",
+    "supabase-postgres-best-practices.tar.gz"
+  ]
+}

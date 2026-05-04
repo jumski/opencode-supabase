@@ -15,6 +15,7 @@
   },
   "files": [
     "src/",
+    "skills/",
     "index.ts",
     "README.md"
   ],
@@ -25,6 +26,7 @@
   "scripts": {
     "lint": "biome check .",
     "verify:pack": "npm pack --dry-run",
+    "skills:sync": "bun scripts/sync-agent-skills.ts",
     "typecheck": "bunx tsc --noEmit",
     "test": "bun test --preload @opentui/solid/preload",
     "changeset": "changeset",
