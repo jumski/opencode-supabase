@@ -13,7 +13,7 @@ const server: Plugin = async (input, options) => {
   return {
     config: async (config) => {
       registerSupabaseSkillPaths(config, options, {
-        warn: (message, data) => logger.warn(message, data as Record<string, unknown>),
+        warn: logger.warn,
       });
     },
     auth: createSupabaseAuth(input, options, { logger }),

@@ -1,7 +1,8 @@
-import { $ } from "bun";
 import { existsSync } from "node:fs";
-import { readdir, mkdir, copyFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { copyFile, mkdir, readdir } from "node:fs/promises";
+import { join } from "node:path";
+
+import { $ } from "bun";
 
 const SOURCE_REPO = "supabase/agent-skills";
 const SKILLS_DIR = "skills";
@@ -31,6 +32,14 @@ async function resolveCommit(inputSha: string) {
   return fullSha;
 }
 
+async function ensureGithubAuth() {
+  try {
+    await $`gh auth status --hostname github.com`;
+  } catch {
+    throw new Error("GitHub CLI authentication required. Run: gh auth login");
+  }
+}
+
 async function copyDir(srcDir: string, destDir: string) {
   await $`rm -rf ${destDir}`;
   await mkdir(destDir, { recursive: true });
@@ -52,6 +61,8 @@ async function main() {
     console.log(usage());
     return;
   }
+
+  await ensureGithubAuth();
 
   const sourceRef = arg ?? (await resolveDefaultBranch());
   const sourceRefType = arg ? "explicit" : "default_branch";

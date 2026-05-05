@@ -105,10 +105,7 @@ The hook must not perform network, git, or async filesystem setup work. It shoul
 
 ## Vendored Skill Source
 
-The source of truth for skill content remains `supabase/agent-skills`. This repository consumes release assets from that producer repo:
-
-- `supabase.tar.gz`
-- `supabase-postgres-best-practices.tar.gz`
+The source of truth for skill content remains `supabase/agent-skills`. This repository consumes tarball snapshots for a resolved upstream commit from that producer repo.
 
 Vendored skills live under:
 
@@ -131,15 +128,14 @@ Initial metadata shape:
   "source_release": null,
   "source_version": null,
   "source_commit": null,
+  "source_ref": null,
+  "source_ref_type": null,
   "synced_at": null,
   "managed_paths": [
     "skills/supabase",
     "skills/supabase-postgres-best-practices"
   ],
-  "assets": [
-    "supabase.tar.gz",
-    "supabase-postgres-best-practices.tar.gz"
-  ]
+  "assets": null
 }
 ```
 
@@ -154,10 +150,10 @@ bun test
 bun run verify:pack
 ```
 
-The sync script should download the latest `supabase/agent-skills` release by default. It should also support an explicit release tag:
+The sync script should download the latest `supabase/agent-skills` default-branch commit by default. It should also support an explicit commit/ref:
 
 ```bash
-bun run skills:sync -- v0.1.0
+bun run skills:sync -- 4bb13d858d19f1f848505a66f46fc9603fdcde95
 ```
 
 After syncing, maintainers review the generated file diff and commit it as normal source. Releases package the already-vendored files from git.
@@ -169,9 +165,9 @@ Create a GitHub issue for later automation. The issue should document how to por
 Future automated workflow should:
 
 - Run on a schedule and via `workflow_dispatch`.
-- Resolve the latest `supabase/agent-skills` release.
+- Resolve the latest `supabase/agent-skills` default-branch commit.
 - Compare it against `skills/.upstream.json`.
-- Download both skill tarballs.
+- Download the upstream repository tarball at the resolved commit.
 - Replace the vendored skill directories.
 - Update `.upstream.json`.
 - Open a PR with real file diffs.

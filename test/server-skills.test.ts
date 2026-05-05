@@ -30,6 +30,15 @@ describe("resolveEnabledSupabaseSkills", () => {
     ]);
     expect(warnings).toHaveLength(1);
   });
+
+  test("warns on non-boolean known skill values", () => {
+    const warnings: unknown[] = [];
+    expect(resolveEnabledSupabaseSkills({ skills: { supabase: "yes" } }, { warn: (_message, data) => warnings.push(data) })).toEqual([
+      "supabase",
+      "supabase-postgres-best-practices",
+    ]);
+    expect(warnings).toHaveLength(1);
+  });
 });
 
 describe("registerSupabaseSkillPaths", () => {
@@ -66,6 +75,36 @@ describe("registerSupabaseSkillPaths", () => {
       warn: (_message, data) => warnings.push(data),
     });
     expect(config.skills?.paths).toEqual(["/plugin/skills/supabase"]);
+    expect(warnings).toHaveLength(1);
+  });
+
+  test("replaces disabled skills config with paths array", () => {
+    const config: { skills?: { paths?: string[] } | false } = { skills: false };
+
+    registerSupabaseSkillPaths(config, undefined, {
+      skillsRoot: "/plugin/skills",
+      exists: () => true,
+    });
+
+    expect(config.skills).toEqual({
+      paths: ["/plugin/skills/supabase", "/plugin/skills/supabase-postgres-best-practices"],
+    });
+  });
+
+  test("replaces malformed paths with a fresh array", () => {
+    const warnings: unknown[] = [];
+    const config = { skills: { paths: "nope" as unknown as string[] } };
+
+    registerSupabaseSkillPaths(config, undefined, {
+      skillsRoot: "/plugin/skills",
+      exists: () => true,
+      warn: (_message, data) => warnings.push(data),
+    });
+
+    expect(config.skills.paths).toEqual([
+      "/plugin/skills/supabase",
+      "/plugin/skills/supabase-postgres-best-practices",
+    ]);
     expect(warnings).toHaveLength(1);
   });
 });

@@ -6,7 +6,7 @@
 
 **Architecture:** Vendor skill files under repo-local `skills/`, register individual skill directories through the server plugin `config` hook, and keep updates deterministic through a manual sync script. No runtime clone, no build-time fetch, and no hidden release-time fetch.
 
-**Tech Stack:** Bun, TypeScript, OpenCode plugin server config hook, GitHub Release assets from `supabase/agent-skills`, existing `bun test` test suite.
+**Tech Stack:** Bun, TypeScript, OpenCode plugin server config hook, GitHub tarball snapshots from `supabase/agent-skills`, existing `bun test` test suite.
 
 ---
 
@@ -15,7 +15,7 @@
 - `skills/.upstream.json` tracks source release metadata for vendored skills.
 - `skills/supabase/` contains the vendored broad Supabase skill.
 - `skills/supabase-postgres-best-practices/` contains the vendored Postgres best-practices skill.
-- `scripts/sync-agent-skills.ts` downloads release tarballs and replaces managed skill directories.
+- `scripts/sync-agent-skills.ts` downloads commit tarballs and replaces managed skill directories.
 - `src/server/skills.ts` resolves plugin options and registers selected skill directories.
 - `src/server/index.ts` wires the new `config` hook into the existing plugin server export.
 - `test/server-skills.test.ts` verifies option semantics and path registration behavior.

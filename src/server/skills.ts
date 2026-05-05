@@ -8,7 +8,7 @@ export const BUNDLED_SUPABASE_SKILLS = [
 
 export type BundledSupabaseSkill = (typeof BUNDLED_SUPABASE_SKILLS)[number];
 
-type Warn = (message: string, data?: unknown) => void;
+type Warn = (message: string, data?: Record<string, unknown>) => unknown;
 
 type ResolverDeps = {
   warn?: Warn;
@@ -21,9 +21,13 @@ type RegisterDeps = ResolverDeps & {
 
 type ConfigWithSkills = object & {
   skills?: {
-    paths?: string[];
-  };
+    paths?: unknown;
+  } | false;
 };
+
+type SkillsConfig = {
+  paths?: unknown;
+} & Record<string, unknown>;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -31,7 +35,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function pluginSkillsOption(options: unknown) {
   if (!isRecord(options) || !("skills" in options)) return true;
-  return options.skills;
+  return (options as { skills?: unknown }).skills;
 }
 
 export function resolveEnabledSupabaseSkills(options: unknown, deps: ResolverDeps = {}) {
@@ -48,6 +52,13 @@ export function resolveEnabledSupabaseSkills(options: unknown, deps: ResolverDep
   for (const key of Object.keys(value)) {
     if (!known.has(key)) {
       deps.warn?.("unknown Supabase bundled skill option ignored", { skill: key });
+      continue;
+    }
+    if (value[key] !== undefined && typeof value[key] !== "boolean") {
+      deps.warn?.("invalid Supabase bundled skill option value", {
+        skill: key,
+        value: value[key] as unknown,
+      });
     }
   }
 
@@ -67,9 +78,24 @@ export function registerSupabaseSkillPaths(
   const skillsRoot = deps.skillsRoot ?? defaultSkillsRoot();
   const exists = deps.exists ?? fs.existsSync;
   const enabled = resolveEnabledSupabaseSkills(options, deps);
+  const skillsConfig: SkillsConfig = isRecord(configWithSkills.skills)
+    ? (configWithSkills.skills as SkillsConfig)
+    : {};
 
-  configWithSkills.skills = configWithSkills.skills ?? {};
-  configWithSkills.skills.paths = configWithSkills.skills.paths ?? [];
+  if (!isRecord(configWithSkills.skills)) {
+    configWithSkills.skills = skillsConfig;
+  }
+
+  if (!Array.isArray(skillsConfig.paths)) {
+    if (skillsConfig.paths !== undefined) {
+      deps.warn?.("invalid Supabase skills.paths value; resetting to array", {
+        value: skillsConfig.paths as unknown,
+      });
+    }
+    skillsConfig.paths = [];
+  }
+
+  const paths = skillsConfig.paths as string[];
 
   for (const skill of enabled) {
     const skillPath = path.join(skillsRoot, skill);
@@ -77,8 +103,9 @@ export function registerSupabaseSkillPaths(
       deps.warn?.("bundled Supabase skill directory not found", { skill, path: skillPath });
       continue;
     }
-    if (!configWithSkills.skills.paths.includes(skillPath)) {
-      configWithSkills.skills.paths.push(skillPath);
+
+    if (!paths.includes(skillPath)) {
+      paths.push(skillPath);
     }
   }
 }
