@@ -13,12 +13,17 @@ async function commandText(strings: TemplateStringsArray, ...values: string[]) {
 }
 
 function usage() {
-  return `Usage: bun run skills:sync <commit-sha>
+  return `Usage: bun run skills:sync [commit-sha-or-ref]
 
-  Pins vendored skills to an explicit upstream commit.
-  Downloads a tarball from ${SOURCE_REPO} at <commit-sha>,
+  Pins vendored skills to an upstream commit.
+  If omitted, syncs latest commit from the upstream default branch.
+  Downloads a tarball from ${SOURCE_REPO} at [commit-sha-or-ref],
   replaces the managed skill directories, and records provenance
   in ${SKILLS_DIR}/.upstream.json.`;
+}
+
+async function resolveDefaultBranch() {
+  return commandText`gh api repos/${SOURCE_REPO} --jq .default_branch`;
 }
 
 async function resolveCommit(inputSha: string) {
@@ -47,17 +52,19 @@ async function main() {
     console.log(usage());
     return;
   }
-  if (!arg) {
-    console.error("Error: commit SHA required. Run with --help for usage.");
-    process.exit(1);
-  }
 
-  const commit = await resolveCommit(arg);
+  const sourceRef = arg ?? (await resolveDefaultBranch());
+  const sourceRefType = arg ? "explicit" : "default_branch";
+  const commit = await resolveCommit(sourceRef);
   const tmp = await commandText`mktemp -d`;
   const tarball = `${tmp}/repo.tar.gz`;
 
   try {
-    await $`gh api repos/${SOURCE_REPO}/tarball/${commit} > ${tarball}`;
+    const tarballBytes = await $`gh api repos/${SOURCE_REPO}/tarball/${commit}`.bytes();
+    if (tarballBytes.byteLength === 0) {
+      throw new Error(`Downloaded empty tarball for ${SOURCE_REPO} ${commit}`);
+    }
+    await Bun.write(tarball, tarballBytes);
     await $`mkdir -p ${tmp}/extracted`;
     await $`tar -xzf ${tarball} -C ${tmp}/extracted`;
 
@@ -77,7 +84,8 @@ async function main() {
       source_release: null,
       source_version: null,
       source_commit: commit,
-      source_ref: arg,
+      source_ref: sourceRef,
+      source_ref_type: sourceRefType,
       synced_at: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
       managed_paths: MANAGED_SKILLS.map((skill) => `${SKILLS_DIR}/${skill}`),
     };

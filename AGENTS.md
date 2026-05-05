@@ -23,5 +23,6 @@ Use this reference when implementing or reviewing authenticated Supabase API too
 
 - Do not replace `skills/` with a symlink or submodule.
 - Do not fetch skills during plugin startup, normal build, or release artifact generation.
-- Use `bun run skills:sync <commit-sha>` to update vendored skills.
+- Use `bun run skills:sync` to update vendored skills from the latest upstream default branch.
+- Use `bun run skills:sync <commit-sha-or-ref>` to sync a specific upstream ref.
 - Review skill diffs and `skills/.upstream.json` before release.

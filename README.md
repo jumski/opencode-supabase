@@ -59,10 +59,11 @@ Per-skill config is a partial override. Omitted skills stay enabled.
 
 ### Maintainer Skill Sync
 
-Bundled skills are vendored as real files under `skills/` from `supabase/agent-skills`, pinned to an explicit upstream commit.
+Bundled skills are vendored as real files under `skills/` from `supabase/agent-skills`, pinned to an exact upstream commit in `skills/.upstream.json`.
 
 ```bash
-bun run skills:sync <commit-sha>
+bun run skills:sync
+# or: bun run skills:sync <commit-sha-or-ref>
 bun run typecheck
 bun test
 bun run verify:pack
