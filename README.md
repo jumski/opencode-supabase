@@ -22,7 +22,7 @@ Connect your account and ask your agent about Supabase capabilities.
 
 ## Bundled Supabase Skills
 
-`opencode-supabase` ships the official Supabase agent skills by default:
+`opencode-supabase` ships the official [Supabase agent skills](https://github.com/supabase/agent-skills) by default:
 
 - `supabase`
 - `supabase-postgres-best-practices`
@@ -43,7 +43,7 @@ If you want Supabase tools without bundled skills, disable them in plugin option
 
 ### Select Individual Skills
 
-Per-skill config is a partial override. Omitted skills stay enabled.
+Set a bundled skill name to `false` to disable only that skill. Omitted skills stay enabled. Unknown keys are ignored with a warning.
 
 ```json
 {
