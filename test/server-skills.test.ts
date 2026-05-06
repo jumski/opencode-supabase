@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
+import path from "node:path";
+import serverModule from "../src/server/index.ts";
 import {
+  defaultSkillsRoot,
   registerSupabaseSkillPaths,
   resolveEnabledSupabaseSkills,
 } from "../src/server/skills.ts";
@@ -127,5 +130,44 @@ describe("registerSupabaseSkillPaths", () => {
 
     expect(config.skills.paths).toBe("nope");
     expect(warnings).toHaveLength(1);
+  });
+});
+
+describe("server config hook", () => {
+  test("registers bundled skill paths", async () => {
+    const hooks = await serverModule.server(
+      {
+        client: {
+          app: {
+            log: () => Promise.resolve(true),
+          },
+        },
+        directory: "/workspace",
+        worktree: "/workspace",
+        serverUrl: new URL("http://localhost:4096"),
+        project: {},
+        $: {},
+      } as never,
+      undefined,
+    );
+
+    const config = {
+      skills: {
+        paths: ["/user/skills"],
+        urls: ["https://example.com/.well-known/skills/"],
+      },
+    };
+
+    await hooks.config?.(config as never);
+
+    const skillsRoot = defaultSkillsRoot();
+    expect(config.skills).toEqual({
+      paths: [
+        "/user/skills",
+        path.join(skillsRoot, "supabase"),
+        path.join(skillsRoot, "supabase-postgres-best-practices"),
+      ],
+      urls: ["https://example.com/.well-known/skills/"],
+    });
   });
 });
