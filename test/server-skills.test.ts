@@ -66,6 +66,29 @@ describe("registerSupabaseSkillPaths", () => {
     ]);
   });
 
+  test("preserves existing paths and urls", () => {
+    const config = {
+      skills: {
+        paths: ["/user/skills"],
+        urls: ["https://example.com/.well-known/skills/"],
+      },
+    };
+
+    registerSupabaseSkillPaths(config, undefined, {
+      skillsRoot: "/plugin/skills",
+      exists: () => true,
+    });
+
+    expect(config.skills).toEqual({
+      paths: [
+        "/user/skills",
+        "/plugin/skills/supabase",
+        "/plugin/skills/supabase-postgres-best-practices",
+      ],
+      urls: ["https://example.com/.well-known/skills/"],
+    });
+  });
+
   test("warns and skips missing directories", () => {
     const warnings: unknown[] = [];
     const config: { skills?: { paths?: string[] } } = {};
@@ -78,22 +101,9 @@ describe("registerSupabaseSkillPaths", () => {
     expect(warnings).toHaveLength(1);
   });
 
-  test("replaces disabled skills config with paths array", () => {
-    const config: { skills?: { paths?: string[] } | false } = { skills: false };
-
-    registerSupabaseSkillPaths(config, undefined, {
-      skillsRoot: "/plugin/skills",
-      exists: () => true,
-    });
-
-    expect(config.skills).toEqual({
-      paths: ["/plugin/skills/supabase", "/plugin/skills/supabase-postgres-best-practices"],
-    });
-  });
-
-  test("replaces malformed paths with a fresh array", () => {
+  test("skips non-object skills config without mutation", () => {
     const warnings: unknown[] = [];
-    const config = { skills: { paths: "nope" as unknown as string[] } };
+    const config: { skills?: unknown } = { skills: false };
 
     registerSupabaseSkillPaths(config, undefined, {
       skillsRoot: "/plugin/skills",
@@ -101,10 +111,21 @@ describe("registerSupabaseSkillPaths", () => {
       warn: (_message, data) => warnings.push(data),
     });
 
-    expect(config.skills.paths).toEqual([
-      "/plugin/skills/supabase",
-      "/plugin/skills/supabase-postgres-best-practices",
-    ]);
+    expect(config.skills).toBe(false);
+    expect(warnings).toHaveLength(1);
+  });
+
+  test("skips malformed paths without mutation", () => {
+    const warnings: unknown[] = [];
+    const config = { skills: { paths: "nope" as unknown } };
+
+    registerSupabaseSkillPaths(config, undefined, {
+      skillsRoot: "/plugin/skills",
+      exists: () => true,
+      warn: (_message, data) => warnings.push(data),
+    });
+
+    expect(config.skills.paths).toBe("nope");
     expect(warnings).toHaveLength(1);
   });
 });

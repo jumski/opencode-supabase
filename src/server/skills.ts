@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 export const BUNDLED_SUPABASE_SKILLS = [
   "supabase",
@@ -22,7 +23,7 @@ type RegisterDeps = ResolverDeps & {
 type ConfigWithSkills = object & {
   skills?: {
     paths?: unknown;
-  } | false;
+  };
 };
 
 type SkillsConfig = {
@@ -66,7 +67,7 @@ export function resolveEnabledSupabaseSkills(options: unknown, deps: ResolverDep
 }
 
 export function defaultSkillsRoot() {
-  return path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../skills");
+  return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../skills");
 }
 
 export function registerSupabaseSkillPaths(
@@ -78,19 +79,26 @@ export function registerSupabaseSkillPaths(
   const skillsRoot = deps.skillsRoot ?? defaultSkillsRoot();
   const exists = deps.exists ?? fs.existsSync;
   const enabled = resolveEnabledSupabaseSkills(options, deps);
-  const skillsConfig: SkillsConfig = isRecord(configWithSkills.skills)
-    ? (configWithSkills.skills as SkillsConfig)
-    : {};
+  let skillsConfig: SkillsConfig;
 
-  if (!isRecord(configWithSkills.skills)) {
+  if (configWithSkills.skills === undefined) {
+    skillsConfig = {};
     configWithSkills.skills = skillsConfig;
+  } else if (isRecord(configWithSkills.skills)) {
+    skillsConfig = configWithSkills.skills as SkillsConfig;
+  } else {
+    deps.warn?.("invalid Supabase skills config; leaving unchanged", {
+      value: configWithSkills.skills as unknown,
+    });
+    return;
   }
 
   if (!Array.isArray(skillsConfig.paths)) {
     if (skillsConfig.paths !== undefined) {
-      deps.warn?.("invalid Supabase skills.paths value; resetting to array", {
+      deps.warn?.("invalid Supabase skills.paths value; leaving unchanged", {
         value: skillsConfig.paths as unknown,
       });
+      return;
     }
     skillsConfig.paths = [];
   }
