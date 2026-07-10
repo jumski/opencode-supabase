@@ -13,7 +13,7 @@ import { buildAuthorizeUrl, generatePKCE, generateState } from "../shared/oauth.
 import type { FetchLike, SupabaseTokenResponse } from "../shared/types.ts";
 import { HTML_SUCCESS, htmlError } from "./auth-html.ts";
 import type { SavedStateNotice } from "./store.ts";
-import { readSavedAuth, writeSavedAuth } from "./store.ts";
+import { canWriteStore, getStoreFile, readSavedAuth, writeSavedAuth } from "./store.ts";
 import { NOT_CONNECTED_MESSAGE, disconnectSupabaseAuth, ensureSupabaseToolAuth } from "./tools.ts";
 
 const CALLBACK_PATH = "/auth/callback";
@@ -23,6 +23,12 @@ const CALLBACK_PORTS = [14589, 14590, 14591] as const;
 type PendingAuth = {
   codeVerifier: string;
   redirectUri: string;
+  // Per-flow storage context (#32): the singleton callback server must persist
+  // to the directory that started THIS flow, not the one that first built it.
+  input: Pick<PluginInput, "directory" | "worktree">;
+  brokerConfig: BrokerConfig;
+  fetch?: FetchLike;
+  logger?: SupabaseLogger;
   resolve: (result: { tokens: SupabaseTokenResponse; expires: number }) => void;
   reject: (error: Error) => void;
   timeout: ReturnType<typeof setTimeout>;
@@ -108,8 +114,6 @@ async function isPortInUse(port: number) {
 
 async function ensureServer(
   callbackPorts: readonly number[],
-  _config: ReturnType<typeof readSupabaseConfig>,
-  input: Pick<PluginInput, "directory" | "worktree">,
   deps: AuthDeps,
 ) {
   const candidatePorts = normalizeCallbackPorts(callbackPorts);
@@ -120,10 +124,6 @@ async function ensureServer(
     }
     return serverPort;
   }
-
-  const brokerConfig: BrokerConfig = {
-    baseUrl: _config.brokerBaseUrl,
-  };
 
   let selectedPort: number | undefined;
   for (const port of candidatePorts) {
@@ -143,11 +143,6 @@ async function ensureServer(
             }
 
             const state = url.searchParams.get("state");
-            await deps.logger?.debug("supabase auth callback received", {
-              has_state: Boolean(state),
-              has_code: Boolean(url.searchParams.get("code")),
-              has_error: Boolean(url.searchParams.get("error")),
-            });
             if (!state) {
               return new Response(htmlError("Missing required state parameter - potential CSRF attack"), {
                 status: 400,
@@ -163,12 +158,18 @@ async function ensureServer(
               });
             }
 
+            await pending.logger?.debug("supabase auth callback received", {
+              has_state: true,
+              has_code: Boolean(url.searchParams.get("code")),
+              has_error: Boolean(url.searchParams.get("error")),
+            });
+
             const error = url.searchParams.get("error");
             const errorDescription = url.searchParams.get("error_description");
             if (error) {
               clearTimeout(pending.timeout);
               pendingAuths.delete(state);
-              await deps.logger?.error("supabase auth failed", {
+              await pending.logger?.error("supabase auth failed", {
                 reason: "provider_denied",
               });
               pending.reject(new Error(errorDescription || error));
@@ -182,7 +183,7 @@ async function ensureServer(
             if (!code) {
               clearTimeout(pending.timeout);
               pendingAuths.delete(state);
-              await deps.logger?.error("supabase auth failed", {
+              await pending.logger?.error("supabase auth failed", {
                 reason: "missing_code",
               });
               pending.reject(new Error("Missing authorization code"));
@@ -196,40 +197,27 @@ async function ensureServer(
             clearTimeout(pending.timeout);
             pendingAuths.delete(state);
 
+            // Exchange first (single-use code), then persist. Separate try/catches
+            // so a persistence failure after a successful exchange surfaces a
+            // targeted recovery message instead of a generic auth failure (#36).
+            let tokens: SupabaseTokenResponse;
+            let expires: number;
             try {
-              const tokens = await exchangeCodeThroughBroker(
-                brokerConfig,
+              tokens = await exchangeCodeThroughBroker(
+                pending.brokerConfig,
                 {
                   code,
                   redirect_uri: pending.redirectUri,
                   code_verifier: pending.codeVerifier,
                 },
-                deps.fetch,
-                deps.logger,
+                pending.fetch,
+                pending.logger,
               );
-
-              const expires = Date.now() + (tokens.expires_in || 3600) * 1000;
-              await writeSavedAuth(input, {
-                access: tokens.access_token,
-                refresh: tokens.refresh_token,
-                expires,
-              });
-
-              pending.resolve({ tokens, expires });
-
-              await deps.logger?.info("supabase auth completed", {
-                status: "success",
-              });
-
-              await stopServerIfIdle(deps.logger, "auth_completed");
-
-              return new Response(HTML_SUCCESS, {
-                headers: { "Content-Type": "text/html" },
-              });
+              expires = Date.now() + (tokens.expires_in || 3600) * 1000;
             } catch (cause) {
               const message = formatAuthError("exchange", cause);
 
-              await deps.logger?.error("supabase auth failed", {
+              await pending.logger?.error("supabase auth failed", {
                 status: cause instanceof BrokerClientError ? cause.status : 400,
                 broker_error: cause instanceof BrokerClientError,
               });
@@ -242,6 +230,41 @@ async function ensureServer(
                 headers: { "Content-Type": "text/html" },
               });
             }
+
+            try {
+              await writeSavedAuth(pending.input, {
+                access: tokens.access_token,
+                refresh: tokens.refresh_token,
+                expires,
+              });
+            } catch (cause) {
+              // Auth succeeded upstream but credentials could not be saved
+              // locally; the code is already spent, so guide recovery (#36).
+              const storePath = getStoreFile(pending.input);
+              const message = `Supabase authorization succeeded, but the credentials could not be saved locally to ${storePath}. Fix permissions/storage and retry.`;
+              await pending.logger?.error("supabase auth persistence failed", {
+                path: storePath,
+                message: cause instanceof Error ? cause.message : String(cause),
+              });
+              pending.reject(new Error(message));
+              await stopServerIfIdle(deps.logger, "persistence_failed");
+              return new Response(htmlError(message), {
+                status: 500,
+                headers: { "Content-Type": "text/html" },
+              });
+            }
+
+            pending.resolve({ tokens, expires });
+
+            await pending.logger?.info("supabase auth completed", {
+              status: "success",
+            });
+
+            await stopServerIfIdle(deps.logger, "auth_completed");
+
+            return new Response(HTML_SUCCESS, {
+              headers: { "Content-Type": "text/html" },
+            });
           },
         });
         selectedPort = port;
@@ -288,6 +311,8 @@ function waitForCallback(
   state: string,
   codeVerifier: string,
   redirectUri: string,
+  input: Pick<PluginInput, "directory" | "worktree">,
+  brokerConfig: BrokerConfig,
   deps: AuthDeps,
 ) {
   return new Promise<{ tokens: SupabaseTokenResponse; expires: number }>((resolve, reject) => {
@@ -305,6 +330,10 @@ function waitForCallback(
     pendingAuths.set(state, {
       codeVerifier,
       redirectUri,
+      input,
+      brokerConfig,
+      fetch: deps.fetch,
+      logger: deps.logger,
       resolve,
       reject,
       timeout,
@@ -327,14 +356,31 @@ export function createSupabaseAuth(
         type: "oauth" as const,
         label: "Supabase",
         async authorize() {
-          const port = await ensureServer(authCallbackPorts, config, input, deps);
+          // Preflight the local store before opening the browser: a permissions/
+          // storage problem should fail fast instead of burning the one-time
+          // OAuth code (#36).
+          if (!(await canWriteStore(input))) {
+            throw new Error(
+              `Supabase auth store is not writable (${getStoreFile(input)}). Fix permissions/storage and retry.`,
+            );
+          }
+
+          const brokerConfig: BrokerConfig = { baseUrl: config.brokerBaseUrl };
+          const port = await ensureServer(authCallbackPorts, deps);
           await deps.logger?.info("supabase auth started", {
             port,
           });
           const pkce = await generatePKCE();
           const state = generateState();
           const redirectUri = callbackUrl(port);
-          const callbackPromise = waitForCallback(state, pkce.verifier, redirectUri, deps);
+          const callbackPromise = waitForCallback(
+            state,
+            pkce.verifier,
+            redirectUri,
+            input,
+            brokerConfig,
+            deps,
+          );
 
           return {
             url: buildAuthorizeUrl(config, redirectUri, pkce, state),

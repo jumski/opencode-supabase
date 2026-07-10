@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve, win32 } from "node:path";
 
 import {
   type SavedState,
+  canWriteStore,
   clearSavedAuth,
   getStoreFile,
   readSavedAuth,
@@ -560,5 +561,35 @@ describe("server auth store", () => {
     expect(getStoreFile(input)).toBe(
       win32.join(input.worktree, ".opencode", "supabase-auth.json"),
     );
+  });
+
+  test("canWriteStore returns true when the store path is writable", async () => {
+    const input = await createInput();
+    expect(await canWriteStore(input)).toBe(true);
+  });
+
+  test("canWriteStore returns false when the store directory is not writable", async () => {
+    const input = await createInput();
+    const dir = join(input.worktree, ".opencode");
+    await mkdir(dir, { recursive: true });
+    await chmod(dir, 0o500);
+    try {
+      expect(await canWriteStore(input)).toBe(false);
+    } finally {
+      await chmod(dir, 0o700);
+    }
+  });
+
+  test("writeSavedAuth writes atomically and leaves no temp files behind", async () => {
+    const input = await createInput();
+    await writeSavedAuth(input, { access: "a", refresh: "r", expires: 1 });
+
+    const dir = dirname(getStoreFile(input));
+    const entries = await readdir(dir);
+    expect(entries).toEqual(["supabase-auth.json"]);
+    await expect(readSavedAuth(input)).resolves.toEqual({
+      version: 1,
+      auth: { access: "a", refresh: "r", expires: 1 },
+    });
   });
 });

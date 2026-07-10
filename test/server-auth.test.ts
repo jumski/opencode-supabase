@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -755,5 +755,115 @@ describe("server auth hook", () => {
         expires: callbackResult.expires,
       },
     });
+  });
+
+  test("two concurrent flows for different directories do not cross-write auth stores (#32)", async () => {
+    const inputA = await createInput();
+    const inputB = await createInput();
+    process.env.OPENCODE_SUPABASE_BROKER_URL = "https://example.com/broker";
+    const fetchMock = mock(async () =>
+      new Response(
+        JSON.stringify({
+          access_token: "access-B",
+          refresh_token: "refresh-B",
+          expires_in: 1800,
+          token_type: "bearer",
+        }),
+      ),
+    );
+
+    // Flow A starts the singleton callback server first (its input used to be captured by the handler).
+    const authA = createSupabaseAuth(
+      inputA as never,
+      { clientId: "plugin-client", oauthPort: 17700 },
+      { fetch: fetchMock as unknown as FetchLike, callbackPorts: [17700, 17701, 17702] },
+    );
+    const resultA = await firstAuthMethod(authA).authorize();
+    void resultA.callback().catch(() => undefined);
+
+    // Flow B reuses the same server (same port window) but targets a different directory.
+    const authB = createSupabaseAuth(
+      inputB as never,
+      { clientId: "plugin-client", oauthPort: 17700 },
+      { fetch: fetchMock as unknown as FetchLike, callbackPorts: [17700, 17701, 17702] },
+    );
+    const resultB = await firstAuthMethod(authB).authorize();
+    const state = requireSearchParam(new URL(resultB.url), "state");
+    const redirectUri = new URL(requireSearchParam(new URL(resultB.url), "redirect_uri"));
+
+    const pending = resultB.callback();
+    const response = await fetch(`${redirectUri.toString()}?code=code-B&state=${state}`);
+    expect(response.status).toBe(200);
+
+    const callbackResult = await pending;
+    expect(callbackResult).toMatchObject({ type: "success", access: "access-B" });
+    if (callbackResult.type !== "success") throw new Error("Expected OAuth callback to succeed");
+
+    // B's tokens land in B's store; A's store stays empty (regression for #32).
+    await expect(readSavedAuth(inputB as never)).resolves.toEqual({
+      version: 1,
+      auth: { access: "access-B", refresh: "refresh-B", expires: callbackResult.expires },
+    });
+    await expect(readSavedAuth(inputA as never)).resolves.toEqual({ version: 1 });
+  });
+
+  test("authorize fails fast when the auth store path is not writable (#36)", async () => {
+    const input = await createInput();
+    process.env.OPENCODE_SUPABASE_BROKER_URL = "https://example.com/broker";
+    const dir = join(input.worktree, ".opencode");
+    await mkdir(dir, { recursive: true });
+    await chmod(dir, 0o500);
+    try {
+      const auth = createSupabaseAuth(
+        input as never,
+        { clientId: "plugin-client", oauthPort: 17710 },
+        { fetch: mock(async () => new Response("ok")) as never, callbackPorts: [17710, 17711, 17712] },
+      );
+      await expect(firstAuthMethod(auth).authorize()).rejects.toThrow(/not writable/);
+    } finally {
+      await chmod(dir, 0o700);
+    }
+  });
+
+  test("persistence failure after exchange gives a targeted recovery message (#36)", async () => {
+    const input = await createInput();
+    process.env.OPENCODE_SUPABASE_BROKER_URL = "https://example.com/broker";
+    const fetchMock = mock(async () =>
+      new Response(
+        JSON.stringify({
+          access_token: "access-123",
+          refresh_token: "refresh-123",
+          expires_in: 1800,
+          token_type: "bearer",
+        }),
+      ),
+    );
+    const auth = createSupabaseAuth(
+      input as never,
+      { clientId: "plugin-client", oauthPort: 17720 },
+      { fetch: fetchMock as unknown as FetchLike, callbackPorts: [17720, 17721, 17722] },
+    );
+
+    const result = await firstAuthMethod(auth).authorize();
+    const state = requireSearchParam(new URL(result.url), "state");
+    const redirectUri = new URL(requireSearchParam(new URL(result.url), "redirect_uri"));
+
+    // Make the store dir unwritable AFTER preflight passed so the post-exchange write fails.
+    const dir = join(input.worktree, ".opencode");
+    await chmod(dir, 0o500);
+    try {
+      const pending = result.callback();
+      pending.catch(() => undefined);
+      const response = await fetch(`${redirectUri.toString()}?code=code-123&state=${state}`);
+
+      expect(response.status).toBe(500);
+      const html = await response.text();
+      expect(html).toContain("could not be saved locally");
+      await expect(pending).rejects.toThrow(/could not be saved locally/);
+      // No partial store was written.
+      await expect(readSavedAuth(input as never)).resolves.toEqual({ version: 1 });
+    } finally {
+      await chmod(dir, 0o700);
+    }
   });
 });

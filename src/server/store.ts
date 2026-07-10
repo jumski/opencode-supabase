@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, open, rename, unlink } from "node:fs/promises";
+import { constants, access, mkdir, open, rename, unlink } from "node:fs/promises";
 import { dirname, join, posix, win32 } from "node:path";
 import type { PluginInput } from "@opencode-ai/plugin";
 
@@ -150,7 +150,16 @@ async function backupFile(path: string, now: () => Date) {
 
 async function writeState(path: string, state: SavedState): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
-  await Bun.write(path, JSON.stringify(state, null, 2));
+  // ponytail: atomic write — temp file + rename so a crash mid-write can't
+  // leave a truncated/corrupt store (same dir => same fs => rename is atomic).
+  const tmp = `${path}.${randomUUID()}.tmp`;
+  await Bun.write(tmp, JSON.stringify(state, null, 2));
+  try {
+    await rename(tmp, path);
+  } catch (error) {
+    await unlink(tmp).catch(() => {});
+    throw error;
+  }
 }
 
 async function acquireRecoveryLock(lockPath: string): Promise<RecoveryLock | undefined> {
@@ -316,6 +325,31 @@ function resolveStoreRoot(input: StoreInput): { root: string; pathApi: PathApi }
   }
 
   return { root: directory, pathApi };
+}
+
+// Preflight: can tokens actually be persisted here? Used before opening the
+// browser so a permissions/storage problem fails fast instead of burning the
+// one-time OAuth code (#36).
+export async function canWriteStore(input: StoreInput): Promise<boolean> {
+  const path = file(input);
+  const dir = dirname(path);
+  try {
+    await mkdir(dir, { recursive: true });
+  } catch {
+    return false;
+  }
+  // Existing file must be writable; if it doesn't exist yet, the dir must be.
+  try {
+    await access(path, constants.W_OK);
+    return true;
+  } catch {
+    try {
+      await access(dir, constants.W_OK);
+      return true;
+    } catch {
+      return false;
+    }
+  }
 }
 
 export function file(input: StoreInput): string {
