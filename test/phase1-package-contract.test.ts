@@ -12,7 +12,7 @@ describe("phase 1 package contract", () => {
     expect(packageJson.name).toBe("opencode-supabase");
     expect(packageJson.main).toBe("./index.ts");
     expect(packageJson.exports["./server"]).toBe("./src/server/index.ts");
-    expect(packageJson.exports["./tui"]).toBe("./src/tui/index.tsx");
+    expect(packageJson.exports["./tui"]).toBe("./dist/tui.js");
     expect(packageJson["oc-plugin"]).toEqual(["server", "tui"]);
   });
 

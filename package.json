@@ -11,10 +11,11 @@
   "main": "./index.ts",
   "exports": {
     "./server": "./src/server/index.ts",
-    "./tui": "./src/tui/index.tsx"
+    "./tui": "./dist/tui.js"
   },
   "files": [
     "src/",
+    "dist/",
     "skills/",
     "index.ts",
     "README.md"
@@ -24,6 +25,8 @@
     "tui"
   ],
   "scripts": {
+    "build": "bun scripts/build.ts",
+    "prepack": "bun run build",
     "lint": "biome check .",
     "verify:pack": "npm pack --dry-run",
     "skills:sync": "bun scripts/sync-agent-skills.ts",
