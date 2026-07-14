@@ -1,9 +1,9 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
-const root = new URL("..", import.meta.url).pathname;
+const root = fileURLToPath(new URL("..", import.meta.url));
 const temp = mkdtempSync(join(root, "node_modules/.packed-tui-"));
 afterAll(() => rmSync(temp, { recursive: true, force: true }));
 
