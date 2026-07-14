@@ -25,3 +25,8 @@ if (!result.success) {
   console.error(...result.logs);
   process.exit(1);
 }
+
+await Bun.write(
+  "dist/tui.d.ts",
+  'import type { TuiPlugin } from "@opencode-ai/plugin/tui";\ndeclare const plugin: { id: string; tui: TuiPlugin };\nexport default plugin;\n',
+);
