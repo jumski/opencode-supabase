@@ -1,4 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test";
+import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,11 +9,17 @@ const root = fileURLToPath(new URL("..", import.meta.url));
 const temp = mkdtempSync(join(tmpdir(), "opencode-supabase-packed-tui-"));
 afterAll(() => rmSync(temp, { recursive: true, force: true }));
 
-function run(command: string[], cwd: string) {
-  return Bun.spawnSync(command, { cwd, env: process.env });
+function run(command: [string, ...string[]], cwd: string) {
+  const [executable, ...args] = command;
+  const result = spawnSync(executable, args, { cwd, env: process.env, shell: process.platform === "win32" });
+  return {
+    exitCode: result.status ?? 1,
+    stdout: result.stdout ?? Buffer.alloc(0),
+    stderr: result.stderr ?? Buffer.alloc(0),
+  };
 }
 
-function output(result: Bun.SyncSubprocess) {
+function output(result: ReturnType<typeof run>) {
   return `${new TextDecoder().decode(result.stdout)}${new TextDecoder().decode(result.stderr)}`;
 }
 
