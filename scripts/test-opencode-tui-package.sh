@@ -84,10 +84,11 @@ done
 [[ "$ready" == true ]]
 
 tmux -S "$SOCKET" send-keys -t "$SESSION" -l '/supabase'
+tmux -S "$SOCKET" send-keys -t "$SESSION" Enter
 rendered=false
 for _ in {1..15}; do
   tmux -S "$SOCKET" capture-pane -p -t "$SESSION" -S - >"$ARTIFACT_DIR/pane.txt"
-  if grep -q 'Connect to Supabase' "$ARTIFACT_DIR/pane.txt"; then
+  if grep -q 'Open your browser to authorize OpenCode to access your Supabase account.' "$ARTIFACT_DIR/pane.txt"; then
     rendered=true
     break
   fi
@@ -96,6 +97,6 @@ done
 [[ "$rendered" == true ]]
 
 PASSED=true
-printf 'OpenCode %s rendered /supabase: Connect to Supabase\n' "$("$OPENCODE_BIN" --version)"
+printf 'OpenCode %s rendered /supabase dialog\n' "$("$OPENCODE_BIN" --version)"
 printf 'Plugin metadata: %s/.opencode/{opencode.json,tui.json}\n' "$ARTIFACT_DIR/work"
 printf 'Evidence retained: %s\n' "$ARTIFACT_DIR"
