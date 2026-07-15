@@ -13,7 +13,7 @@ const solid = {
 };
 
 const result = await Bun.build({
-  entrypoints: ["src/tui/index.tsx"],
+  entrypoints: ["src/tui/index.ts"],
   outdir: "dist",
   naming: "tui.js",
   target: "bun",

@@ -8,7 +8,13 @@ SOCKET="tmux.sock"
 SESSION="opencode-supabase-$$"
 PASSED=false
 
-mkdir -p "$ARTIFACT_DIR"/{home,tmp,config,data,cache,state,runtime,config-dirs,data-dirs,work,package}
+if [[ -e "$ARTIFACT_DIR" ]]; then
+  printf 'Artifact directory already exists: %s\n' "$ARTIFACT_DIR" >&2
+  exit 1
+fi
+
+mkdir -p "$ARTIFACT_DIR"/{home,tmp,config,data,cache,state,runtime,config-dirs,data-dirs,work,package,npm/cache,npm/config}
+touch "$ARTIFACT_DIR/npm/config/userconfig" "$ARTIFACT_DIR/npm/config/globalconfig"
 chmod 700 "$ARTIFACT_DIR/runtime"
 cd "$ARTIFACT_DIR"
 
@@ -24,7 +30,12 @@ diagnostics() {
   done >"$ARTIFACT_DIR/plugin-metadata.txt" 2>&1 || true
   if [[ "$PASSED" != true ]]; then
     printf 'OpenCode TUI regression failed. Diagnostics retained: %s\n' "$ARTIFACT_DIR" >&2
-    for file in install.stdout install.stderr pane.txt tui.stderr opencode-version.txt tarball.sha256 plugin-metadata.txt; do
+    for file in install.stdout install.stderr pane.txt tui.stderr; do
+      [[ -f "$ARTIFACT_DIR/$file" ]] && { printf '\n=== %s ===\n' "$file" >&2; cat "$ARTIFACT_DIR/$file" >&2; }
+    done
+    file=data/opencode/log/opencode.log
+    [[ -f "$ARTIFACT_DIR/$file" ]] && { printf '\n=== %s ===\n' "$file" >&2; cat "$ARTIFACT_DIR/$file" >&2; }
+    for file in opencode-version.txt tarball.sha256 plugin-metadata.txt; do
       [[ -f "$ARTIFACT_DIR/$file" ]] && { printf '\n=== %s ===\n' "$file" >&2; cat "$ARTIFACT_DIR/$file" >&2; }
     done
   fi
@@ -33,19 +44,30 @@ diagnostics() {
 }
 trap diagnostics EXIT INT TERM
 
-PACK_JSON="$(cd "$ROOT" && npm pack --json --pack-destination "$ARTIFACT_DIR/package")"
+PACK_JSON="$(cd "$ROOT" && env -i \
+  PATH="$PATH" \
+  HOME="$ARTIFACT_DIR/home" \
+  NPM_CONFIG_CACHE="$ARTIFACT_DIR/npm/cache" \
+  NPM_CONFIG_USERCONFIG="$ARTIFACT_DIR/npm/config/userconfig" \
+  NPM_CONFIG_GLOBALCONFIG="$ARTIFACT_DIR/npm/config/globalconfig" \
+  NPM_CONFIG_IGNORE_SCRIPTS=false \
+  npm pack --json --pack-destination "$ARTIFACT_DIR/package")"
 TARBALL="$ARTIFACT_DIR/package/$(jq -r '.[0].filename' <<<"$PACK_JSON")"
 printf '%s\n' "$PACK_JSON" >"$ARTIFACT_DIR/npm-pack.json"
-
-# OpenCode 1.17.14 reads package metadata beside file: tarballs before registering them.
-tar -xzf "$TARBALL" -C "$ARTIFACT_DIR/package" --strip-components=1
 
 git -C "$ARTIFACT_DIR/work" init -q
 clean_env=(
   env -i
   "PATH=$PATH"
   "HOME=$ARTIFACT_DIR/home"
+  "USER=${USER:-$(id -un)}"
+  "LOGNAME=${LOGNAME:-${USER:-$(id -un)}}"
   "TMPDIR=$ARTIFACT_DIR/tmp"
+  "NPM_CONFIG_CACHE=$ARTIFACT_DIR/npm/cache"
+  "NPM_CONFIG_USERCONFIG=$ARTIFACT_DIR/npm/config/userconfig"
+  "NPM_CONFIG_GLOBALCONFIG=$ARTIFACT_DIR/npm/config/globalconfig"
+  "NPM_CONFIG_IGNORE_SCRIPTS=false"
+  "OPENCODE_DISABLE_AUTOUPDATE=1"
   "XDG_CONFIG_HOME=$ARTIFACT_DIR/config"
   "XDG_DATA_HOME=$ARTIFACT_DIR/data"
   "XDG_CACHE_HOME=$ARTIFACT_DIR/cache"
@@ -55,19 +77,20 @@ clean_env=(
   "XDG_DATA_DIRS=$ARTIFACT_DIR/data-dirs"
 )
 
+[[ ! -e "$ARTIFACT_DIR/home/.opencode" ]]
 (
   cd "$ARTIFACT_DIR/work"
-  "${clean_env[@]}" "$OPENCODE_BIN" plugin "file://$TARBALL" --print-logs --log-level DEBUG
+  "${clean_env[@]}" "$OPENCODE_BIN" plugin "file:$TARBALL" --print-logs --log-level DEBUG
 ) >"$ARTIFACT_DIR/install.stdout" 2>"$ARTIFACT_DIR/install.stderr"
 
 grep -q 'Plugin package ready' "$ARTIFACT_DIR/install.stdout"
 for metadata in opencode.json tui.json; do
-  jq -e --arg spec "file://$TARBALL" '.plugin == [$spec]' "$ARTIFACT_DIR/work/.opencode/$metadata" >/dev/null
+  jq -e --arg spec "file:$TARBALL" '.plugin == [$spec]' "$ARTIFACT_DIR/work/.opencode/$metadata" >/dev/null
 done
 
 cat >"$ARTIFACT_DIR/launch.sh" <<EOF
 #!/bin/sh
-exec env -i PATH="$PATH" HOME="$ARTIFACT_DIR/home" TMPDIR="$ARTIFACT_DIR/tmp" XDG_CONFIG_HOME="$ARTIFACT_DIR/config" XDG_DATA_HOME="$ARTIFACT_DIR/data" XDG_CACHE_HOME="$ARTIFACT_DIR/cache" XDG_STATE_HOME="$ARTIFACT_DIR/state" XDG_RUNTIME_DIR="$ARTIFACT_DIR/runtime" XDG_CONFIG_DIRS="$ARTIFACT_DIR/config-dirs" XDG_DATA_DIRS="$ARTIFACT_DIR/data-dirs" TERM=xterm-256color "$OPENCODE_BIN" --print-logs --log-level DEBUG 2>"$ARTIFACT_DIR/tui.stderr"
+exec env -i PATH="$PATH" HOME="$ARTIFACT_DIR/home" USER="${USER:-$(id -un)}" LOGNAME="${LOGNAME:-${USER:-$(id -un)}}" TMPDIR="$ARTIFACT_DIR/tmp" NPM_CONFIG_CACHE="$ARTIFACT_DIR/npm/cache" NPM_CONFIG_USERCONFIG="$ARTIFACT_DIR/npm/config/userconfig" NPM_CONFIG_GLOBALCONFIG="$ARTIFACT_DIR/npm/config/globalconfig" NPM_CONFIG_IGNORE_SCRIPTS=false OPENCODE_DISABLE_AUTOUPDATE=1 XDG_CONFIG_HOME="$ARTIFACT_DIR/config" XDG_DATA_HOME="$ARTIFACT_DIR/data" XDG_CACHE_HOME="$ARTIFACT_DIR/cache" XDG_STATE_HOME="$ARTIFACT_DIR/state" XDG_RUNTIME_DIR="$ARTIFACT_DIR/runtime" XDG_CONFIG_DIRS="$ARTIFACT_DIR/config-dirs" XDG_DATA_DIRS="$ARTIFACT_DIR/data-dirs" TERM=xterm-256color "$OPENCODE_BIN" --print-logs --log-level DEBUG 2>"$ARTIFACT_DIR/tui.stderr"
 EOF
 chmod +x "$ARTIFACT_DIR/launch.sh"
 
@@ -88,7 +111,8 @@ tmux -S "$SOCKET" send-keys -t "$SESSION" Enter
 rendered=false
 for _ in {1..15}; do
   tmux -S "$SOCKET" capture-pane -p -t "$SESSION" -S - >"$ARTIFACT_DIR/pane.txt"
-  if grep -q 'Open your browser to authorize OpenCode to access your Supabase account.' "$ARTIFACT_DIR/pane.txt"; then
+  if grep -q 'Open your browser to authorize OpenCode' "$ARTIFACT_DIR/pane.txt" &&
+    grep -q 'Supabase account.' "$ARTIFACT_DIR/pane.txt"; then
     rendered=true
     break
   fi

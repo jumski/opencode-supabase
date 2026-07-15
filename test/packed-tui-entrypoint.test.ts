@@ -1,6 +1,6 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -53,6 +53,11 @@ describe("packed TUI entrypoint", () => {
     const imported = run([process.execPath, "-e", 'console.log((await import("opencode-supabase/tui")).default.id)'], consumer);
     expect(imported.exitCode, output(imported)).toBe(0);
     expect(new TextDecoder().decode(imported.stdout).trim()).toBe("supabase");
+
+    const bundled = readFileSync(join(consumer, "node_modules/opencode-supabase/dist/tui.js"), "utf8");
+    for (const forbidden of ["@opentui/core", "@opentui/solid", "solid-js", "solid-js/store"]) {
+      expect(bundled).not.toContain(forbidden);
+    }
 
     const checked = run([command("tsc")], consumer);
     expect(checked.exitCode, output(checked)).toBe(0);
