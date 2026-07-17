@@ -1,6 +1,6 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,6 +8,17 @@ import { fileURLToPath } from "node:url";
 const root = fileURLToPath(new URL("..", import.meta.url));
 const temp = mkdtempSync(join(tmpdir(), "opencode-supabase-packed-tui-"));
 afterAll(() => rmSync(temp, { recursive: true, force: true }));
+
+const runtimeModuleIdForSpecifier = (specifier: string) => `opentui:runtime-module:${encodeURIComponent(specifier)}`;
+
+const requiredRuntimeSpecifiers = ["@opentui/core", "@opentui/solid", "solid-js"] as const;
+const allowedRuntimeSpecifiers = [
+  ...requiredRuntimeSpecifiers,
+  "@opentui/solid/components",
+  "@opentui/solid/jsx-runtime",
+  "@opentui/solid/jsx-dev-runtime",
+  "solid-js/store",
+] as const;
 
 function run(command: [string, ...string[]], cwd: string) {
   const [executable, ...args] = command;
@@ -24,7 +35,7 @@ function output(result: ReturnType<typeof run>) {
 }
 
 describe("packed TUI entrypoint", () => {
-  test("resolves at runtime and from TypeScript in an isolated consumer", () => {
+  test("ships a compiled rich TUI using only canonical host runtime modules", () => {
     const consumer = join(temp, "consumer");
     function command(name: "npm" | "tsc") {
       const suffix = process.platform === "win32" ? ".cmd" : "";
@@ -50,13 +61,39 @@ describe("packed TUI entrypoint", () => {
       JSON.stringify({ compilerOptions: { module: "Preserve", moduleResolution: "Bundler", noEmit: true, strict: true, skipLibCheck: true } }),
     );
 
-    const imported = run([process.execPath, "-e", 'console.log((await import("opencode-supabase/tui")).default.id)'], consumer);
-    expect(imported.exitCode, output(imported)).toBe(0);
-    expect(new TextDecoder().decode(imported.stdout).trim()).toBe("supabase");
+    const installedPackage = join(consumer, "node_modules/opencode-supabase");
+    const metadata = JSON.parse(readFileSync(join(installedPackage, "package.json"), "utf8"));
+    expect(metadata.exports["./tui"]).toBe("./dist/tui.js");
 
-    const bundled = readFileSync(join(consumer, "node_modules/opencode-supabase/dist/tui.js"), "utf8");
-    for (const forbidden of ["@opentui/core", "@opentui/solid", "solid-js", "solid-js/store"]) {
-      expect(bundled).not.toContain(forbidden);
+    const bundled = readFileSync(join(installedPackage, "dist/tui.js"), "utf8");
+    for (const specifier of requiredRuntimeSpecifiers) {
+      expect(bundled).toContain(runtimeModuleIdForSpecifier(specifier));
+    }
+    for (const specifier of allowedRuntimeSpecifiers) {
+      const escaped = specifier.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      expect(bundled).not.toMatch(new RegExp(`(?:from\\s*|import\\s*\\(|require\\s*\\()(["'])${escaped}\\1`));
+    }
+    for (const malformed of [
+      "opentui:runtime-module:@opentui/core",
+      "opentui:runtime-module:@opentui/solid",
+      "opentui:runtime-module:solid-js/store",
+    ]) {
+      expect(bundled).not.toContain(malformed);
+    }
+    expect(bundled).toContain("Starting authorization...");
+    expect(bundled).toContain("Waiting for browser authorization...");
+    for (const frame of ["280B", "2819", "2839", "2838", "283C", "2834", "2826", "2827", "2807", "280F"]) {
+      expect(bundled).toContain(`\\u${frame}`);
+    }
+
+    for (const specifier of requiredRuntimeSpecifiers) {
+      expect(metadata.dependencies?.[specifier]).toBeUndefined();
+      expect(metadata.peerDependencies?.[specifier]).toBeDefined();
+      expect(metadata.peerDependenciesMeta?.[specifier]?.optional).toBe(true);
+      expect(metadata.devDependencies?.[specifier]).toBeDefined();
+    }
+    for (const runtimePath of ["@opentui/core", "@opentui/solid", "solid-js"]) {
+      expect(existsSync(join(installedPackage, "node_modules", runtimePath))).toBe(false);
     }
 
     const checked = run([command("tsc")], consumer);

@@ -4,7 +4,7 @@ import { HTML_SUCCESS } from "../src/server/auth-html.ts";
 import serverModule from "../src/server/index.ts";
 import { createSupabaseCommand } from "../src/tui/commands.ts";
 import { SupabaseDialog, runAuthFlow, runAuthPreflight } from "../src/tui/dialog.tsx";
-import tuiModule, { runSupabaseAuth } from "../src/tui/index.ts";
+import tuiModule from "../src/tui/index.tsx";
 
 type LogEntry = Record<string, unknown>;
 
@@ -186,13 +186,11 @@ test("supabase command exposes the expected slash metadata", () => {
   expect(opened).toBe(1);
 });
 
-test("tui plugin registers /supabase and completes OAuth through host UI", async () => {
+test("tui plugin registers /supabase and launches the rich checking dialog", async () => {
   let commandsFactory: (() => Array<Record<string, unknown>>) | undefined;
   let replaceFactory: (() => unknown) | undefined;
   const authorizeCalls: unknown[] = [];
-  const callbackCalls: unknown[] = [];
-  const toasts: Array<{ variant?: string; message: string }> = [];
-  let usedCustomDialog = false;
+  const setSizes: string[] = [];
 
   await tuiModule.tui(
     {
@@ -202,19 +200,15 @@ test("tui plugin registers /supabase and completes OAuth through host UI", async
           return () => {};
         },
       },
+      route: { current: { name: "home" }, navigate: () => {} },
       ui: {
-        Dialog: (input: unknown) => {
-          usedCustomDialog = true;
-          return input;
-        },
-        DialogConfirm: (input: unknown) => input,
         dialog: {
           replace: (factory: () => unknown) => {
             replaceFactory = factory;
           },
           clear: () => {},
+          setSize: (size: string) => setSizes.push(size),
         },
-        toast: (input: { variant?: string; message: string }) => toasts.push(input),
       },
       client: {
         app: {
@@ -224,11 +218,7 @@ test("tui plugin registers /supabase and completes OAuth through host UI", async
           oauth: {
             authorize: (input: unknown) => {
               authorizeCalls.push(input);
-              return Promise.resolve({ data: { url: "https://example.com/auth", instructions: "Test", method: "manual" } });
-            },
-            callback: (input: unknown) => {
-              callbackCalls.push(input);
-              return Promise.resolve({ data: true });
+              return new Promise(() => {});
             },
           },
         },
@@ -250,113 +240,9 @@ test("tui plugin registers /supabase and completes OAuth through host UI", async
   expect(typeof replaceFactory).toBe("function");
 
   const rendered = replaceFactory?.();
-  expect(rendered).toMatchObject({
-    message: "Open your browser to authorize OpenCode to access your Supabase account.",
-  });
-  expect(usedCustomDialog).toBe(false);
-
-  await (rendered as { onConfirm: () => Promise<void> }).onConfirm();
-  expect(authorizeCalls).toEqual([{ providerID: "supabase", method: 0 }]);
-  expect(callbackCalls).toEqual([{ providerID: "supabase", method: 0 }]);
-  expect(replaceFactory?.()).toMatchObject({
-    message: expect.stringContaining("https://example.com/auth"),
-  });
-  expect(toasts).toContainEqual({ variant: "success", message: "Supabase account connected." });
-});
-
-test("cancelled OAuth completion does not mutate a newer dialog", async () => {
-  let command: { onSelect?: () => void } | undefined;
-  let replaceFactory: (() => unknown) | undefined;
-  let cleared = 0;
-  let resolveCallback!: (value: { data: boolean }) => void;
-  const toasts: Array<{ variant?: string; message: string }> = [];
-
-  await tuiModule.tui({
-    command: { register: (factory: () => Array<{ onSelect?: () => void }>) => { command = factory()[0]; } },
-    ui: {
-      DialogConfirm: (input: unknown) => input,
-      dialog: {
-        replace: (factory: () => unknown) => { replaceFactory = factory; },
-        clear: () => { cleared += 1; },
-      },
-      toast: (input: { variant?: string; message: string }) => toasts.push(input),
-    },
-    client: {
-      app: { log: () => Promise.resolve({ data: true }) },
-      provider: { oauth: {
-        authorize: () => Promise.resolve({ data: { url: "https://example.com/auth", method: "manual" } }),
-        callback: () => new Promise((resolve) => { resolveCallback = resolve; }),
-      } },
-    },
-  } as never, undefined, {} as never);
-
-  command?.onSelect?.();
-  const initial = replaceFactory?.() as { onConfirm: () => Promise<void> };
-  const flow = initial.onConfirm();
-  await Promise.resolve();
-  await Promise.resolve();
-  const waiting = replaceFactory?.() as { onCancel: () => void };
-  waiting.onCancel();
-  command?.onSelect?.();
-  const newerDialog = replaceFactory;
-
-  resolveCallback({ data: true });
-  await flow;
-
-  expect(replaceFactory).toBe(newerDialog);
-  expect(cleared).toBe(1);
-  expect(toasts).toEqual([]);
-});
-
-test("tui plugin reports OAuth errors through host UI", async () => {
-  let command: { onSelect?: () => void } | undefined;
-  let replaceFactory: (() => unknown) | undefined;
-  const toasts: Array<{ variant?: string; message: string }> = [];
-
-  await tuiModule.tui({
-    command: { register: (factory: () => Array<{ onSelect?: () => void }>) => { command = factory()[0]; } },
-    ui: {
-      DialogConfirm: (input: unknown) => input,
-      dialog: { replace: (factory: () => unknown) => { replaceFactory = factory; }, clear: () => {} },
-      toast: (input: { variant?: string; message: string }) => toasts.push(input),
-    },
-    client: {
-      app: { log: () => Promise.resolve({ data: true }) },
-      provider: { oauth: { authorize: () => Promise.resolve({ error: "authorization unavailable" }) } },
-    },
-  } as never, undefined, {} as never);
-
-  command?.onSelect?.();
-  const rendered = replaceFactory?.() as { onConfirm: () => Promise<void> };
-  await rendered.onConfirm();
-
-  expect(toasts).toContainEqual({ variant: "error", message: expect.stringContaining("authorization unavailable") });
-});
-
-test("automatic OAuth continues to callback when browser opening fails", async () => {
-  const calls: string[] = [];
-  const api = createDialogApi({
-    client: {
-      app: { log: () => Promise.resolve({ data: true }) },
-      provider: {
-        oauth: {
-          authorize: () => Promise.resolve({ data: { url: "https://example.com/auth", method: "auto" } }),
-          callback: () => {
-            calls.push("callback");
-            return Promise.resolve({ data: true });
-          },
-        },
-      },
-    },
-  });
-
-  await runSupabaseAuth(api as never, createLogger(), async (url) => {
-    calls.push(url);
-    throw new Error("browser unavailable");
-  });
-
-  expect(calls).toEqual(["https://example.com/auth", "callback"]);
-  expect(api.__test.toasts).toContainEqual({ variant: "success", message: "Supabase account connected." });
+  expect(typeof rendered).toBe("function");
+  expect(setSizes).toEqual(["medium"]);
+  expect(authorizeCalls).toEqual([]);
 });
 
 test("supabase dialog shows toast without onboarding after waiting dialog was dismissed", async () => {
@@ -1271,7 +1157,7 @@ test("supabase dialog starts preflight only once while first check is pending", 
   expect(authorizeCalls).toBe(1);
 });
 
-test("tui plugin dialog rendering does not start OAuth before confirmation", async () => {
+test("tui plugin dialog rendering starts only the queued auth preflight", async () => {
   let commandsFactory: (() => Array<Record<string, unknown>>) | undefined;
   let replaceFactory: (() => unknown) | undefined;
   let authorizeCalls = 0;
@@ -1353,8 +1239,8 @@ test("tui plugin dialog rendering does not start OAuth before confirmation", asy
   await Promise.resolve();
   await Promise.resolve();
 
-  expect(authorizeCalls).toBe(0);
-  expect(resolveFirstAuthorize).toBeUndefined();
+  expect(authorizeCalls).toBe(1);
+  expect(resolveFirstAuthorize).toBeDefined();
 });
 
 test("supabase dialog keeps disconnect failure visible", async () => {

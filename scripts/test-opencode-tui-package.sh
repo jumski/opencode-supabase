@@ -44,16 +44,24 @@ diagnostics() {
 }
 trap diagnostics EXIT INT TERM
 
-PACK_JSON="$(cd "$ROOT" && env -i \
-  PATH="$PATH" \
-  HOME="$ARTIFACT_DIR/home" \
-  NPM_CONFIG_CACHE="$ARTIFACT_DIR/npm/cache" \
-  NPM_CONFIG_USERCONFIG="$ARTIFACT_DIR/npm/config/userconfig" \
-  NPM_CONFIG_GLOBALCONFIG="$ARTIFACT_DIR/npm/config/globalconfig" \
-  NPM_CONFIG_IGNORE_SCRIPTS=false \
-  npm pack --json --pack-destination "$ARTIFACT_DIR/package")"
-TARBALL="$ARTIFACT_DIR/package/$(jq -r '.[0].filename' <<<"$PACK_JSON")"
-printf '%s\n' "$PACK_JSON" >"$ARTIFACT_DIR/npm-pack.json"
+if [[ -n "${PACKAGE_TARBALL:-}" ]]; then
+  [[ "$PACKAGE_TARBALL" = /* && -f "$PACKAGE_TARBALL" ]] || {
+    printf 'PACKAGE_TARBALL must be an absolute existing file: %s\n' "$PACKAGE_TARBALL" >&2
+    exit 1
+  }
+  TARBALL="$PACKAGE_TARBALL"
+else
+  PACK_JSON="$(cd "$ROOT" && env -i \
+    PATH="$PATH" \
+    HOME="$ARTIFACT_DIR/home" \
+    NPM_CONFIG_CACHE="$ARTIFACT_DIR/npm/cache" \
+    NPM_CONFIG_USERCONFIG="$ARTIFACT_DIR/npm/config/userconfig" \
+    NPM_CONFIG_GLOBALCONFIG="$ARTIFACT_DIR/npm/config/globalconfig" \
+    NPM_CONFIG_IGNORE_SCRIPTS=false \
+    npm pack --json --pack-destination "$ARTIFACT_DIR/package")"
+  TARBALL="$ARTIFACT_DIR/package/$(jq -r '.[0].filename' <<<"$PACK_JSON")"
+  printf '%s\n' "$PACK_JSON" >"$ARTIFACT_DIR/npm-pack.json"
+fi
 
 git -C "$ARTIFACT_DIR/work" init -q
 clean_env=(
@@ -120,7 +128,32 @@ for _ in {1..15}; do
 done
 [[ "$rendered" == true ]]
 
+tmux -S "$SOCKET" send-keys -t "$SESSION" Enter
+rich_rendered=false
+for _ in {1..30}; do
+  tmux -S "$SOCKET" capture-pane -p -t "$SESSION" -S - >"$ARTIFACT_DIR/pane.txt"
+  if grep -q 'Connect to Supabase' "$ARTIFACT_DIR/pane.txt" &&
+    grep -Eq 'Starting authorization|Waiting for browser authorization' "$ARTIFACT_DIR/pane.txt" &&
+    grep -q 'Dismiss' "$ARTIFACT_DIR/pane.txt"; then
+    rich_rendered=true
+    break
+  fi
+  sleep 1
+done
+[[ "$rich_rendered" == true ]]
+
+for evidence in "$ARTIFACT_DIR/pane.txt" "$ARTIFACT_DIR/tui.stderr" "$ARTIFACT_DIR/data/opencode/log/opencode.log"; do
+  if [[ -f "$evidence" ]] && grep -Eqi "No renderer found|failed to load tui plugin|Cannot find module 'react/jsx-dev-runtime'" "$evidence"; then
+    printf 'Forbidden runtime error found in %s\n' "$evidence" >&2
+    exit 1
+  fi
+done
+
+tmux -S "$SOCKET" send-keys -t "$SESSION" Escape
+sleep 1
+
 PASSED=true
-printf 'OpenCode %s rendered /supabase dialog\n' "$("$OPENCODE_BIN" --version)"
+printf 'OpenCode %s rendered rich /supabase dialog\n' "$("$OPENCODE_BIN" --version)"
+printf 'Tarball SHA-256: %s\n' "$(sha256sum "$TARBALL" | cut -d ' ' -f 1)"
 printf 'Plugin metadata: %s/.opencode/{opencode.json,tui.json}\n' "$ARTIFACT_DIR/work"
 printf 'Evidence retained: %s\n' "$ARTIFACT_DIR"

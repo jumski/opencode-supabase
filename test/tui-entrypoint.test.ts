@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import tuiModule from "../src/tui/index.ts";
+import tuiModule from "../src/tui/index.tsx";
 
 describe("tui entrypoint", () => {
   test("exports the supabase tui plugin module", () => {

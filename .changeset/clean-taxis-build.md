@@ -2,4 +2,4 @@
 "opencode-supabase": patch
 ---
 
-Ship the TUI entrypoint as compiled JavaScript and use OpenCode's host dialogs for `/supabase` authorization. This avoids both TSX transformation and duplicate renderer failures when loading the plugin from `node_modules`.
+Ship the rich `/supabase` TUI as compiled JavaScript and resolve OpenTUI/Solid through OpenCode's host runtime modules. This avoids raw TSX transformation failures under `node_modules` without loading a plugin-private renderer.
