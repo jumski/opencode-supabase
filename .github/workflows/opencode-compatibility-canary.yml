@@ -1,16 +1,99 @@
-# Scheduled early-warning for new OpenCode releases. Never runs on pull
-# requests and is never a required check. When a new stable release passes
-# here, promote it by editing .github/opencode-versions.json (see
-# docs/releasing.md).
+# Scheduled early-warning against the floating OpenCode frontier. Never runs on
+# pull requests and is never a required check.
+#
+# Schedule: last 2 minor lines × latest 2 patches each.
+# Manual dispatch (workflow_dispatch): test a single custom version or dist-tag
+# (e.g. beta, 0.0.0-beta-202607201938, 2.0.0-beta.1 when it exists).
+#
+# When a new stable release passes here, promote it by editing
+# .github/opencode-versions.json (see docs/releasing.md). Future automation can
+# open that PR automatically.
 name: OpenCode compatibility canary
 
 on:
   schedule:
     - cron: "17 6 * * 1"
   workflow_dispatch:
+    inputs:
+      opencode-version:
+        description: 'npm version or dist-tag (e.g. beta, 0.0.0-beta-…, 2.0.0-beta.1) — skips matrix, runs single cell'
+        required: false
+        type: string
+      reason:
+        description: 'Free-text label (e.g. "2.x snapshot smoke") shown in notices and metadata'
+        required: false
+        type: string
+
+run-name: "canary ${{ inputs.opencode-version || 'scheduled matrix' }}"
 
 jobs:
-  canary:
+  # Dynamic version resolver. On schedule: last 2 minors × latest 2 patches.
+  # On manual dispatch: exact version or dist-tag from the input, validated
+  # against npm registry.
+  resolve:
+    runs-on: ubuntu-latest
+    outputs:
+      versions: ${{ steps.resolve.outputs.versions }}
+      latest: ${{ steps.resolve.outputs.latest }}
+    steps:
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Resolve canary versions
+        id: resolve
+        run: |
+          set -euo pipefail
+
+          CUSTOM='${{ inputs.opencode-version }}'
+          REASON='${{ inputs.reason }}'
+
+          notice() { echo "::notice title=OpenCode canary::${1}"; }
+          summary() { echo "${1}" >>"$GITHUB_STEP_SUMMARY"; }
+
+          if [[ -n "$CUSTOM" ]]; then
+            VERSION="$(npm view "opencode-ai@${CUSTOM}" version 2>&1)" || {
+              echo "::error::opencode-ai@${CUSTOM} not found on npm registry — check the version"
+              exit 1
+            }
+            if [[ -z "$VERSION" ]]; then
+              echo "::error::No version resolved for opencode-ai@${CUSTOM}"
+              exit 1
+            fi
+            notice "Manual dispatch: $VERSION${REASON:+ ($REASON)}"
+            summary "**Manual dispatch:** opencode-ai@${CUSTOM} → ${VERSION}${REASON:+ — $REASON}"
+            echo "versions=$(jq -cn '$v' --arg v "$VERSION")" >>"$GITHUB_OUTPUT"
+            echo "latest=${VERSION}" >>"$GITHUB_OUTPUT"
+          else
+            # Stable versions only (exclude prerelease and 0.x)
+            ALL="$(npm view opencode-ai versions --json | jq -r '.[]' | grep -vE '[-]|^0\.')"
+
+            VERSIONS="$(echo "$ALL" | sort -t. -k1,1n -k2,2n -k3,3n \
+              | awk -F. '{print $1"."$2}' | uniq | tail -2 \
+              | while read -r minor; do
+                  echo "$ALL" | grep "^${minor//./\\.}\\." | sort -t. -k1,1n -k2,2n -k3,3n | tail -2
+                done \
+              | jq -R -s -c 'split("\n") | map(select(length>0)) | unique')"
+
+            LATEST="$(echo "$ALL" | sort -t. -k1,1n -k2,2n -k3,3n | tail -1)"
+
+            notice "Scheduled matrix: last 2 minors × latest 2 patches. Latest stable: ${LATEST}"
+            summary "**Scheduled matrix:** ${VERSIONS}"
+            echo "versions=${VERSIONS}" >>"$GITHUB_OUTPUT"
+            echo "latest=${LATEST}" >>"$GITHUB_OUTPUT"
+          fi
+
+  # Run the TUI harness for every resolved version. Each cell packs its own
+  # tarball (no cross-workflow artifact sharing — the matrix runs in this
+  # workflow only). Skip if the resolver emitted an empty matrix.
+  tui:
+    needs: resolve
+    if: ${{ fromJSON(needs.resolve.outputs.versions)[0] != '' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        opencode-version: ${{ fromJSON(needs.resolve.outputs.versions) }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -29,18 +112,9 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Resolve floating OpenCode version
-        id: opencode
-        run: |
-          set -euo pipefail
-          VERSION="$(npm view opencode-ai version)"
-          echo "version=$VERSION" >>"$GITHUB_OUTPUT"
-          echo "::notice title=OpenCode canary version::$VERSION"
-          echo "OpenCode canary version: **$VERSION**" >>"$GITHUB_STEP_SUMMARY"
-
       - name: Install OpenCode and tmux
         run: |
-          npm install -g opencode-ai@${{ steps.opencode.outputs.version }}
+          npm install -g opencode-ai@${{ matrix.opencode-version }}
           sudo apt-get update
           sudo apt-get install -y tmux
 
@@ -51,7 +125,38 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: opencode-${{ steps.opencode.outputs.version }}-canary-evidence
+          name: opencode-${{ matrix.opencode-version }}-canary-evidence
           path: ${{ runner.temp }}/canary
           retention-days: 14
           if-no-files-found: error
+
+  # Surface the overall result. For scheduled runs, lists all tested versions.
+  # For manual dispatches, shows the single resolved version.
+  summary:
+    needs: tui
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Canary summary
+        run: |
+          VERSIONS='${{ needs.resolve.outputs.versions }}'
+          LATEST='${{ needs.resolve.outputs.latest }}'
+
+          if [[ -z "$VERSIONS" || "$VERSIONS" == "[]" ]]; then
+            echo "::notice title=OpenCode canary::No versions to test"
+            echo "No stable versions found." >>"$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          LABELS="$(echo "$VERSIONS" | jq -r 'join(", ")')"
+          echo "::notice title=OpenCode canary result::Tested: ${LABELS} | Latest: ${LATEST}"
+
+          if [[ "${{ needs.tui.result }}" == "success" ]]; then
+            echo "✅ Canary passed: ${LABELS}" >>"$GITHUB_STEP_SUMMARY"
+            echo "All cells green. Latest stable: **${LATEST}**." >>"$GITHUB_STEP_SUMMARY"
+          else
+            echo "⚠️ **Canary failed** — one or more cells above." >>"$GITHUB_STEP_SUMMARY"
+            echo "Tested: ${LABELS} | Latest: ${LATEST}" >>"$GITHUB_STEP_SUMMARY"
+            echo "Check the *tui* job logs for failures." >>"$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
