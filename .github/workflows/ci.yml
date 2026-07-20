@@ -20,6 +20,7 @@ jobs:
   # (.github/workflows/opencode-compatibility-canary.yml) resolves floating
   # versions itself and never blocks PRs; future automation can bump this file.
   versions:
+    name: Supported OpenCode versions
     runs-on: ubuntu-latest
     outputs:
       pinned: ${{ steps.read.outputs.pinned }}
@@ -39,6 +40,7 @@ jobs:
   # One tarball per run. Every package-facing job downloads and verifies this
   # exact file by SHA-256; nothing re-packs.
   build-package:
+    name: Build package + source checks
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -94,6 +96,7 @@ jobs:
   # npm install, and raw server import. It must not re-pack, re-run source
   # checks, or import opencode-supabase/tui outside the OpenCode host.
   package-smoke:
+    name: Windows install smoke (OpenCode ${{ needs.versions.outputs.pinned }})
     needs:
       - build-package
       - versions
@@ -159,6 +162,7 @@ jobs:
           bun -e "await import('opencode-supabase/server'); console.log('packed server import ok')"
 
   tui-e2e:
+    name: TUI render E2E (OpenCode ${{ matrix.opencode-version }})
     needs:
       - build-package
       - versions
