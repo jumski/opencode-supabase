@@ -43,11 +43,11 @@ jobs:
 
       - name: Resolve canary versions
         id: resolve
+        env:
+          CUSTOM: ${{ inputs.opencode-version }}
+          REASON: ${{ inputs.reason }}
         run: |
           set -euo pipefail
-
-          CUSTOM='${{ inputs.opencode-version }}'
-          REASON='${{ inputs.reason }}'
 
           notice() { echo "::notice title=OpenCode canary::${1}"; }
           summary() { echo "${1}" >>"$GITHUB_STEP_SUMMARY"; }
@@ -63,7 +63,7 @@ jobs:
             fi
             notice "Manual dispatch: $VERSION${REASON:+ ($REASON)}"
             summary "**Manual dispatch:** opencode-ai@${CUSTOM} → ${VERSION}${REASON:+ — $REASON}"
-            echo "versions=$(jq -cn '$v' --arg v "$VERSION")" >>"$GITHUB_OUTPUT"
+            echo "versions=$(jq -cn '[$v]' --arg v "$VERSION")" >>"$GITHUB_OUTPUT"
             echo "latest=${VERSION}" >>"$GITHUB_OUTPUT"
           else
             # Stable versions only (exclude prerelease and 0.x)
@@ -88,6 +88,7 @@ jobs:
   # tarball (no cross-workflow artifact sharing — the matrix runs in this
   # workflow only). Skip if the resolver emitted an empty matrix.
   tui:
+    name: TUI canary (OpenCode ${{ matrix.opencode-version }})
     needs: resolve
     if: ${{ fromJSON(needs.resolve.outputs.versions)[0] != '' }}
     strategy:
@@ -133,7 +134,7 @@ jobs:
   # Surface the overall result. For scheduled runs, lists all tested versions.
   # For manual dispatches, shows the single resolved version.
   summary:
-    needs: tui
+    needs: [resolve, tui]
     if: always()
     runs-on: ubuntu-latest
     steps:
