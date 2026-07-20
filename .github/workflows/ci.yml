@@ -68,6 +68,7 @@ jobs:
           SHA256="$(sha256sum "$FILENAME" | cut -d ' ' -f 1)"
           jq --arg sha256 "$SHA256" '.[0] + {sha256: $sha256}' pack-output.json >package-metadata.json
           echo "tarball=$(pwd)/$FILENAME" >>"$GITHUB_OUTPUT"
+          echo "::notice title=Artifact identity::Tarball version ($FILENAME) is the changesets-managed package.json version — contents are built from this checkout. Run identity is the SHA-256 below."
           printf 'Tarball: %s\nSHA-256: %s\n' "$FILENAME" "$SHA256"
 
       - name: Lint
