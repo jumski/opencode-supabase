@@ -92,6 +92,9 @@ jobs:
         run: bunx changeset status --since=origin/main
 
   plugin-smoke:
+    # `opencode-supabase/tui` requires OpenCode's host runtime resolver. Keep this
+    # smoke server-only; `opencode-tui-regression` covers the real TUI boundary.
+    # Follow-up package CI architecture: https://github.com/supabase-community/opencode-supabase/issues/73
     strategy:
       fail-fast: false
       matrix:
@@ -114,6 +117,9 @@ jobs:
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.3.11
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
 
       - name: Install OpenCode
         run: npm i -g opencode-ai@1.4.3
@@ -144,7 +150,7 @@ jobs:
           CONSUMER_DIR="$(mktemp -d)"
           cd "$CONSUMER_DIR"
           npm install "$SPEC"
-          bun --preload @opentui/solid/preload -e 'await import("opencode-supabase/server"); await import("opencode-supabase/tui"); console.log("packed imports ok")'
+          bun -e 'await import("opencode-supabase/server"); console.log("packed server import ok")'
 
       - name: Smoke plugin install (windows)
         if: matrix.os == 'windows-latest'
@@ -178,4 +184,41 @@ jobs:
           New-Item -ItemType Directory -Path $consumer -Force | Out-Null
           Set-Location $consumer
           npm install $spec
-          bun --preload @opentui/solid/preload -e "await import('opencode-supabase/server'); await import('opencode-supabase/tui'); console.log('packed imports ok')"
+          bun -e "await import('opencode-supabase/server'); console.log('packed server import ok')"
+
+  opencode-tui-regression:
+    name: OpenCode 1.17.14 TUI regression
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.11
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Install pinned OpenCode and tmux
+        run: |
+          npm install -g opencode-ai@1.17.14
+          sudo apt-get update
+          sudo apt-get install -y tmux
+
+      - name: Exercise packed TUI in OpenCode
+        run: scripts/test-opencode-tui-package.sh "$RUNNER_TEMP/opencode-tui-regression"
+
+      - name: Upload TUI diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: opencode-1.17.14-tui-diagnostics
+          path: ${{ runner.temp }}/opencode-tui-regression
+          if-no-files-found: error

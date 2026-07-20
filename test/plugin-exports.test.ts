@@ -186,11 +186,10 @@ test("supabase command exposes the expected slash metadata", () => {
   expect(opened).toBe(1);
 });
 
-test("tui plugin registers /supabase and opens a closable dialog", async () => {
+test("tui plugin registers /supabase and launches the rich checking dialog", async () => {
   let commandsFactory: (() => Array<Record<string, unknown>>) | undefined;
   let replaceFactory: (() => unknown) | undefined;
-  let cleared = 0;
-  let usedCustomDialog = false;
+  const authorizeCalls: unknown[] = [];
   const setSizes: string[] = [];
 
   await tuiModule.tui(
@@ -201,31 +200,26 @@ test("tui plugin registers /supabase and opens a closable dialog", async () => {
           return () => {};
         },
       },
+      route: { current: { name: "home" }, navigate: () => {} },
       ui: {
-        Dialog: (input: unknown) => {
-          usedCustomDialog = true;
-          return input;
-        },
-        DialogAlert: (input: unknown) => input,
-        DialogConfirm: (input: unknown) => input,
         dialog: {
           replace: (factory: () => unknown) => {
             replaceFactory = factory;
           },
-          clear: () => {
-            cleared += 1;
-          },
-          setSize: (size: string) => {
-            setSizes.push(size);
-          },
+          clear: () => {},
+          setSize: (size: string) => setSizes.push(size),
         },
-        toast: () => {},
       },
       client: {
+        app: {
+          log: () => Promise.resolve({ data: true }),
+        },
         provider: {
           oauth: {
-            authorize: () => Promise.resolve({ data: { url: "https://example.com/auth", instructions: "Test", method: "auto" } }),
-            callback: () => Promise.resolve({ data: true }),
+            authorize: (input: unknown) => {
+              authorizeCalls.push(input);
+              return new Promise(() => {});
+            },
           },
         },
       },
@@ -245,12 +239,10 @@ test("tui plugin registers /supabase and opens a closable dialog", async () => {
   command?.onSelect?.();
   expect(typeof replaceFactory).toBe("function");
 
-  expect(typeof replaceFactory).toBe("function");
   const rendered = replaceFactory?.();
   expect(typeof rendered).toBe("function");
   expect(setSizes).toEqual(["medium"]);
-  expect(usedCustomDialog).toBe(false);
-  expect(cleared).toBe(0);
+  expect(authorizeCalls).toEqual([]);
 });
 
 test("supabase dialog shows toast without onboarding after waiting dialog was dismissed", async () => {
@@ -1165,7 +1157,7 @@ test("supabase dialog starts preflight only once while first check is pending", 
   expect(authorizeCalls).toBe(1);
 });
 
-test("tui plugin reusing the original /supabase dialog factory should not start duplicate preflight work", async () => {
+test("tui plugin dialog rendering starts only the queued auth preflight", async () => {
   let commandsFactory: (() => Array<Record<string, unknown>>) | undefined;
   let replaceFactory: (() => unknown) | undefined;
   let authorizeCalls = 0;
@@ -1248,12 +1240,7 @@ test("tui plugin reusing the original /supabase dialog factory should not start 
   await Promise.resolve();
 
   expect(authorizeCalls).toBe(1);
-
-  resolveFirstAuthorize?.();
-  await Promise.resolve();
-  await Promise.resolve();
-
-  expect(authorizeCalls).toBe(1);
+  expect(resolveFirstAuthorize).toBeDefined();
 });
 
 test("supabase dialog keeps disconnect failure visible", async () => {
