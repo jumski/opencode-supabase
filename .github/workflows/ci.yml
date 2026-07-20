@@ -88,7 +88,7 @@ jobs:
           path: |
             ${{ steps.pack.outputs.tarball }}
             package-metadata.json
-          retention-days: 1
+          retention-days: 3
 
   # Windows: no native tmux/pty (MSYS2/WSL too fragile), so TUI render coverage
   # stays Linux-only in tui-e2e. This job keeps the host-realistic Windows

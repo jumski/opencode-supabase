@@ -66,6 +66,7 @@ wait_for() {
   while ((SECONDS < deadline)); do
     if ! tmux -S "$SOCKET" has-session -t "$SESSION" 2>/dev/null; then
       printf 'tmux session died while waiting for %s\n' "$desc" >&2
+      printf '%s\n' "dead session: $desc" >>"$ARTIFACT_DIR/failure-reason.txt"
       return 1
     fi
     tmux -S "$SOCKET" capture-pane -p -t "$SESSION" -S - >"$ARTIFACT_DIR/pane.txt" 2>/dev/null || true
@@ -82,6 +83,7 @@ wait_for() {
     sleep 1
   done
   printf 'Timed out after %ss waiting for %s\n' "$seconds" "$desc" >&2
+  printf '%s\n' "timeout (${seconds}s): $desc" >>"$ARTIFACT_DIR/failure-reason.txt"
   return 1
 }
 

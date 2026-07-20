@@ -53,10 +53,15 @@ jobs:
           summary() { echo "${1}" >>"$GITHUB_STEP_SUMMARY"; }
 
           if [[ -n "$CUSTOM" ]]; then
-            VERSION="$(npm view "opencode-ai@${CUSTOM}" version 2>&1)" || {
+            VERSION_JSON="$(npm view "opencode-ai@${CUSTOM}" version --json)" || {
               echo "::error::opencode-ai@${CUSTOM} not found on npm registry — check the version"
               exit 1
             }
+            if [[ "$(jq -r 'type' <<<"$VERSION_JSON")" != "string" ]]; then
+              echo "::error::opencode-ai@${CUSTOM} resolved to multiple versions (range or wildcard). Use an exact version or dist-tag."
+              exit 1
+            fi
+            VERSION="$(jq -r '.' <<<"$VERSION_JSON")"
             if [[ -z "$VERSION" ]]; then
               echo "::error::No version resolved for opencode-ai@${CUSTOM}"
               exit 1
@@ -90,7 +95,7 @@ jobs:
   tui:
     name: TUI canary (OpenCode ${{ matrix.opencode-version }})
     needs: resolve
-    if: ${{ fromJSON(needs.resolve.outputs.versions)[0] != '' }}
+    if: ${{ fromJSON(needs.resolve.outputs.versions)[0] != null }}
     strategy:
       fail-fast: false
       matrix:
