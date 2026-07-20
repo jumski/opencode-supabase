@@ -135,7 +135,10 @@ jobs:
           $env:LOCALAPPDATA = Join-Path $tempHome 'AppData/Local'
 
           $resolved = (Resolve-Path $tarball.FullName).Path -replace '\\','/'
-          $spec = "file:///$resolved"
+          # Same `file:<path>` form the Linux tmux harness uses; the file:///
+          # URL form is mis-parsed by OpenCode 1.17.x on Windows (treated as a
+          # directory, manifest read fails).
+          $spec = "file:$resolved"
 
           $workdir = Join-Path ([IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString())
           New-Item -ItemType Directory -Path $workdir -Force | Out-Null
