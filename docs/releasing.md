@@ -32,7 +32,9 @@ Supported OpenCode host versions are declared in `.github/opencode-versions.json
 
 The required `tui-e2e` CI job renders the packed plugin in a real OpenCode + tmux host against both versions on every PR. `package-smoke` verifies the Windows install boundary at `pinned`.
 
-A scheduled canary (`.github/workflows/opencode-compatibility-canary.yml`, weekly + manual) runs the same harness against `opencode-ai@latest`. It never blocks PRs; the exact resolved version is surfaced as a run annotation, in the run summary, and in the uploaded evidence.
+A scheduled canary (`.github/workflows/opencode-compatibility-canary.yml`, weekly Monday at 06:17 UTC + manual) runs the TUI harness against a **dynamic frontier matrix** — the last 2 minor lines × the latest 2 patches each (e.g. 1.17.19, 1.17.20, 1.18.3, 1.18.4). It never blocks PRs.
+
+**Manual dispatch** (triggered from the Actions tab) accepts an optional `opencode-version` (exact version or dist-tag like `beta`, `0.0.0-beta-…`, `2.0.0-beta.1`) and an optional `reason` label. When supplied, the dynamic matrix is skipped and a single cell runs against that version. This is the prescribed way to smoke unreleased or snapshot builds before they appear as stable releases. The resolved version, matrix contents, and overall result are surfaced as run annotations, in the step summary, and in the uploaded evidence.
 
 Promotion process when the canary passes on a newer release:
 
