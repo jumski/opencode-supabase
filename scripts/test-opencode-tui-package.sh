@@ -155,6 +155,7 @@ tmux -S "$SOCKET" new-session -d -s "$SESSION" -x 120 -y 40 -c "$ARTIFACT_DIR/wo
 wait_for 120 "TUI readiness" 'Ask anything'
 
 tmux -S "$SOCKET" send-keys -t "$SESSION" -l '/supabase'
+wait_for 15 "/supabase command registration" '/supabase\s+Connect to Supabase'
 tmux -S "$SOCKET" send-keys -t "$SESSION" Enter
 wait_for 15 "/supabase command dialog" 'Open your browser to authorize OpenCode' 'Supabase account\.'
 
