@@ -1,0 +1,57 @@
+# Scheduled early-warning for new OpenCode releases. Never runs on pull
+# requests and is never a required check. When a new stable release passes
+# here, promote it by editing .github/opencode-versions.json (see
+# docs/releasing.md).
+name: OpenCode compatibility canary
+
+on:
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+jobs:
+  canary:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.11
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Resolve floating OpenCode version
+        id: opencode
+        run: |
+          set -euo pipefail
+          VERSION="$(npm view opencode-ai version)"
+          echo "version=$VERSION" >>"$GITHUB_OUTPUT"
+          echo "::notice title=OpenCode canary version::$VERSION"
+          echo "OpenCode canary version: **$VERSION**" >>"$GITHUB_STEP_SUMMARY"
+
+      - name: Install OpenCode and tmux
+        run: |
+          npm install -g opencode-ai@${{ steps.opencode.outputs.version }}
+          sudo apt-get update
+          sudo apt-get install -y tmux
+
+      - name: Exercise packed TUI in OpenCode
+        run: scripts/test-opencode-tui-package.sh "$RUNNER_TEMP/canary"
+
+      - name: Upload canary evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: opencode-${{ steps.opencode.outputs.version }}-canary-evidence
+          path: ${{ runner.temp }}/canary
+          retention-days: 14
+          if-no-files-found: error
