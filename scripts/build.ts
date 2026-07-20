@@ -1,3 +1,4 @@
+import { rm } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { runtimeModuleIdForSpecifier } from "@opentui/core/runtime-plugin";
 
@@ -42,6 +43,8 @@ const hostRuntimeModules = {
     });
   },
 };
+
+await rm("dist", { recursive: true, force: true });
 
 const result = await Bun.build({
   entrypoints: ["src/tui/index.tsx"],

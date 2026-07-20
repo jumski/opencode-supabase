@@ -6,7 +6,7 @@ Connect OpenCode to Supabase: account login, Management API tools, bundled Supab
 
 ## Quickstart
 
-Requires OpenCode `>= 1.3.4`.
+Requires OpenCode `>= 1.17.4`.
 
 ```bash
 opencode plugin opencode-supabase

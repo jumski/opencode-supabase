@@ -7,7 +7,11 @@ import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const temp = mkdtempSync(join(tmpdir(), "opencode-supabase-packed-tui-"));
-afterAll(() => rmSync(temp, { recursive: true, force: true }));
+const staleOutput = join(root, "dist", "stale-output.js");
+afterAll(() => {
+  rmSync(temp, { recursive: true, force: true });
+  rmSync(staleOutput, { force: true });
+});
 
 const runtimeModuleIdForSpecifier = (specifier: string) => `opentui:runtime-module:${encodeURIComponent(specifier)}`;
 
@@ -42,6 +46,8 @@ describe("packed TUI entrypoint", () => {
       return name === "npm" ? `npm${suffix}` : join(consumer, `node_modules/.bin/tsc${suffix}`);
     }
 
+    mkdirSync(join(root, "dist"), { recursive: true });
+    writeFileSync(staleOutput, "stale package output");
     const pack = run([command("npm"), "pack", "--json", "--pack-destination", temp], root);
     expect(pack.exitCode, output(pack)).toBe(0);
 
@@ -66,6 +72,7 @@ describe("packed TUI entrypoint", () => {
     expect(metadata.exports["./tui"]).toBe("./dist/tui.js");
 
     const bundled = readFileSync(join(installedPackage, "dist/tui.js"), "utf8");
+    expect(existsSync(join(installedPackage, "dist/stale-output.js"))).toBe(false);
     for (const specifier of requiredRuntimeSpecifiers) {
       expect(bundled).toContain(runtimeModuleIdForSpecifier(specifier));
     }
