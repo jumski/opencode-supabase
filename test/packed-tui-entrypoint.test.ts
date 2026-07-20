@@ -58,7 +58,7 @@ describe("packed TUI entrypoint", () => {
     );
     writeFileSync(
       join(consumer, "tsconfig.json"),
-      JSON.stringify({ compilerOptions: { module: "Preserve", moduleResolution: "Bundler", noEmit: true, strict: true, skipLibCheck: true } }),
+      JSON.stringify({ compilerOptions: { module: "Preserve", moduleResolution: "Bundler", noEmit: true, strict: true } }),
     );
 
     const installedPackage = join(consumer, "node_modules/opencode-supabase");
@@ -93,7 +93,7 @@ describe("packed TUI entrypoint", () => {
       expect(metadata.devDependencies?.[specifier]).toBeDefined();
     }
     for (const runtimePath of ["@opentui/core", "@opentui/solid", "solid-js"]) {
-      expect(existsSync(join(installedPackage, "node_modules", runtimePath))).toBe(false);
+      expect(existsSync(join(consumer, "node_modules", runtimePath))).toBe(false);
     }
 
     const checked = run([command("tsc")], consumer);

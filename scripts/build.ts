@@ -60,5 +60,5 @@ if (!result.success) {
 
 await Bun.write(
   "dist/tui.d.ts",
-  'import type { TuiPlugin } from "@opencode-ai/plugin/tui";\ndeclare const plugin: { id: string; tui: TuiPlugin };\nexport default plugin;\n',
+  'declare const plugin: { id: "supabase"; tui: unknown };\nexport default plugin;\n',
 );
