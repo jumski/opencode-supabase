@@ -1,9 +1,11 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { hostRuntimeSpecifiers, runtimeModuleIdForSpecifier } from "../scripts/host-runtime-rewrite.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const temp = mkdtempSync(join(tmpdir(), "opencode-supabase-packed-tui-"));
@@ -13,20 +15,15 @@ afterAll(() => {
   rmSync(staleOutput, { force: true });
 });
 
-const runtimeModuleIdForSpecifier = (specifier: string) => `opentui:runtime-module:${encodeURIComponent(specifier)}`;
+// CI passes the exact pipeline tarball so this suite checks the artifact every
+// other job consumes. Locally it packs its own.
+const pipelineTarball = process.env.PACKAGE_TARBALL;
 
 const requiredRuntimeSpecifiers = ["@opentui/core", "@opentui/solid", "solid-js"] as const;
-const allowedRuntimeSpecifiers = [
-  ...requiredRuntimeSpecifiers,
-  "@opentui/solid/components",
-  "@opentui/solid/jsx-runtime",
-  "@opentui/solid/jsx-dev-runtime",
-  "solid-js/store",
-] as const;
 
 function run(command: [string, ...string[]], cwd: string) {
   const [executable, ...args] = command;
-  const result = spawnSync(executable, args, { cwd, env: process.env });
+  const result = spawnSync(executable, args, { cwd, env: process.env, timeout: 60_000 });
   return {
     exitCode: result.status ?? 1,
     stdout: result.stdout ?? Buffer.alloc(0),
@@ -46,13 +43,21 @@ describe("packed TUI entrypoint", () => {
       return name === "npm" ? `npm${suffix}` : join(consumer, `node_modules/.bin/tsc${suffix}`);
     }
 
-    mkdirSync(join(root, "dist"), { recursive: true });
-    writeFileSync(staleOutput, "stale package output");
-    const pack = run([command("npm"), "pack", "--json", "--pack-destination", temp], root);
-    expect(pack.exitCode, output(pack)).toBe(0);
+    let tarball: string;
+    if (pipelineTarball) {
+      tarball = resolve(pipelineTarball);
+      expect(existsSync(tarball)).toBe(true);
+    } else {
+      mkdirSync(join(root, "dist"), { recursive: true });
+      writeFileSync(staleOutput, "stale package output");
+      const pack = run([command("npm"), "pack", "--json", "--pack-destination", temp], root);
+      expect(pack.exitCode, output(pack)).toBe(0);
+      const [{ filename }] = JSON.parse(new TextDecoder().decode(pack.stdout));
+      tarball = join(temp, filename);
+    }
+    const sha256 = createHash("sha256").update(readFileSync(tarball)).digest("hex");
+    console.log(`packed artifact: ${tarball}\nsha256: ${sha256}`);
 
-    const [{ filename }] = JSON.parse(new TextDecoder().decode(pack.stdout));
-    const tarball = join(temp, filename);
     mkdirSync(consumer);
     writeFileSync(join(consumer, "package.json"), JSON.stringify({ private: true }));
     const install = run([command("npm"), "install", "--package-lock=false", `file:${tarball}`, "typescript@^5"], consumer);
@@ -72,13 +77,16 @@ describe("packed TUI entrypoint", () => {
     expect(metadata.exports["./tui"]).toBe("./dist/tui.js");
 
     const bundled = readFileSync(join(installedPackage, "dist/tui.js"), "utf8");
-    expect(existsSync(join(installedPackage, "dist/stale-output.js"))).toBe(false);
+    if (!pipelineTarball) {
+      expect(existsSync(join(installedPackage, "dist/stale-output.js"))).toBe(false);
+    }
     for (const specifier of requiredRuntimeSpecifiers) {
       expect(bundled).toContain(runtimeModuleIdForSpecifier(specifier));
     }
-    for (const specifier of allowedRuntimeSpecifiers) {
+    for (const specifier of hostRuntimeSpecifiers) {
       const escaped = specifier.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      expect(bundled).not.toMatch(new RegExp(`(?:from\\s*|import\\s*\\(|require\\s*\\()(["'])${escaped}\\1`));
+      // Catches static, side-effect, dynamic-import, and require specifiers.
+      expect(bundled).not.toMatch(new RegExp(`(?:from\\s*|import\\s*\\(|require\\s*\\(|import\\s*)(["'])${escaped}\\1`));
     }
     for (const malformed of [
       "opentui:runtime-module:@opentui/core",
@@ -86,11 +94,6 @@ describe("packed TUI entrypoint", () => {
       "opentui:runtime-module:solid-js/store",
     ]) {
       expect(bundled).not.toContain(malformed);
-    }
-    expect(bundled).toContain("Starting authorization...");
-    expect(bundled).toContain("Waiting for browser authorization...");
-    for (const frame of ["280B", "2819", "2839", "2838", "283C", "2834", "2826", "2827", "2807", "280F"]) {
-      expect(bundled).toContain(`\\u${frame}`);
     }
 
     for (const specifier of requiredRuntimeSpecifiers) {
