@@ -29,9 +29,12 @@ Weekly cron + `workflow_dispatch`, never on PRs. Resolves `opencode-ai@latest` e
 
 ## Build rewriting (`scripts/build.ts`, `scripts/transform-solid.mjs`)
 
-Replace PR #72's broad quoted-string regex with an import-aware Babel plugin (`scripts/host-runtime-rewrite.mjs`): rewrites only `ImportDeclaration` / `ExportNamedDeclaration` / `ExportAllDeclaration` / dynamic `import()` / `require()` specifiers that match the host-runtime specifier list, via `runtimeModuleIdForSpecifier` from `@opentui/core/runtime-plugin`. The `onResolve` externalizer stays as backstop for plain `.ts` files. Unrelated string literals (e.g. `"solid-js"`) are never touched — covered by a regression test.
+Replace PR #72's broad quoted-string regex with an import-aware Babel plugin (`scripts/host-runtime-rewrite.mjs`): rewrites only `ImportDeclaration` / `ExportNamedDeclaration` / `ExportAllDeclaration` / dynamic `import()` / `require()` specifiers that match the host-runtime specifier list. The `onResolve` externalizer stays as backstop for plain `.ts` files and preset-generated jsx-runtime imports. Unrelated string literals (e.g. `"solid-js"`) are never touched — covered by a regression test.
 
-Note: OpenTUI's official `createRuntimePlugin` is unusable at build time — it inlines real runtime copies via `build.module()` (it is the host-side dev loader). Verified in `node_modules/@opentui/core/runtime-plugin.js`.
+Two constraints discovered during implementation:
+
+- OpenTUI's official `createRuntimePlugin` is unusable at build time — it inlines real runtime copies via `build.module()` (it is the host-side dev loader). Verified in `node_modules/@opentui/core/runtime-plugin.js`.
+- `@opentui/core` entry points are Bun-only, but `transform-solid.mjs` runs under plain Node (spawned by `build.ts`). The encoder therefore lives in `host-runtime-rewrite.mjs` as a plain-JS one-liner; byte parity with `@opentui/core/runtime-plugin`'s `runtimeModuleIdForSpecifier` is asserted in `test/build-transform.test.ts`.
 
 ## Packed artifact test (`test/packed-tui-entrypoint.test.ts`)
 
@@ -46,6 +49,7 @@ Note: OpenTUI's official `createRuntimePlugin` is unusable at build time — it 
 
 - `wait_for <seconds> <desc> <cmd...>` deadline helper; polls predicate + `tmux has-session` each tick; fails fast with explicit dead-session/timeout reason.
 - Readiness = visible pane predicate (`Ask anything`) only; private log text dropped.
+- After typing `/supabase`, wait for the visible palette entry before sending Enter (floor 1.17.4 swallows early Enter); doubles as the command-registration assertion.
 - Pack/install/launch bounded with `timeout`.
 - Idempotent cleanup; evidence (pane, configs, versions, SHA-256, timestamps) captured to metadata before cleanup.
 - `PACKAGE_TARBALL` seam kept; tarball SHA-256 printed/verified.
