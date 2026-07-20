@@ -92,6 +92,9 @@ jobs:
         run: bunx changeset status --since=origin/main
 
   plugin-smoke:
+    # `opencode-supabase/tui` requires OpenCode's host runtime resolver. Keep this
+    # smoke server-only; `opencode-tui-regression` covers the real TUI boundary.
+    # Follow-up package CI architecture: https://github.com/supabase-community/opencode-supabase/issues/73
     strategy:
       fail-fast: false
       matrix:
@@ -147,7 +150,7 @@ jobs:
           CONSUMER_DIR="$(mktemp -d)"
           cd "$CONSUMER_DIR"
           npm install "$SPEC"
-          bun -e 'await import("opencode-supabase/server"); await import("opencode-supabase/tui"); console.log("packed imports ok")'
+          bun -e 'await import("opencode-supabase/server"); console.log("packed server import ok")'
 
       - name: Smoke plugin install (windows)
         if: matrix.os == 'windows-latest'
@@ -181,7 +184,7 @@ jobs:
           New-Item -ItemType Directory -Path $consumer -Force | Out-Null
           Set-Location $consumer
           npm install $spec
-          bun -e "await import('opencode-supabase/server'); await import('opencode-supabase/tui'); console.log('packed imports ok')"
+          bun -e "await import('opencode-supabase/server'); console.log('packed server import ok')"
 
   opencode-tui-regression:
     name: OpenCode 1.17.14 TUI regression
