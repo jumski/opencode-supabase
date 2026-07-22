@@ -1,6 +1,5 @@
 import { rm } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-// @ts-expect-error plain-JS module without declarations; scripts/ is not typechecked
 import { hostRuntimeSpecifiers, runtimeModuleIdForSpecifier } from "./host-runtime-rewrite.mjs";
 
 const transform = fileURLToPath(new URL("transform-solid.mjs", import.meta.url));

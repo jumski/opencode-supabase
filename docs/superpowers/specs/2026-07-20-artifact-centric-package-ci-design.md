@@ -17,7 +17,7 @@ Three test layers:
 ## CI jobs (`.github/workflows/ci.yml`)
 
 - `versions` — reads `.github/opencode-versions.json` (`{"floor","pinned"}`), exposes step outputs. Single source of truth for supported host versions; promotion = edit this file; future canary automation targets it.
-- `build-package` (ubuntu) — frozen install → `npm pack --json` → metadata (filename, SHA-256, inventory) → `PACKAGE_TARBALL=<tgz> bun run lint|typecheck|test` (packed test reuses exact tarball) → upload artifact (`retention-days: 1`).
+- `build-package` (ubuntu) — frozen install → `npm pack --json` → metadata (filename, SHA-256, inventory) → lint/typecheck + `PACKAGE_TARBALL=<tgz> bun run test` (only the packed test consumes the tarball) → upload artifact (`retention-days: 3`).
 - `package-smoke` (windows, `needs: [build-package, versions]`) — download artifact, verify SHA-256, install pinned OpenCode, keep existing checks: `opencode plugin file:...`, `plugin_origins` registration, consumer `npm install`, raw `opencode-supabase/server` import. No pack/lint/typecheck/test/TUI import. No tmux on Windows (no native tmux/pty; MSYS2/WSL too fragile) — TUI render coverage is Linux-only.
 - `tui-e2e` (linux, `needs: [build-package, versions]`) — dynamic matrix `[floor, pinned]` from `versions`; download artifact, verify SHA-256, run tmux harness with `PACKAGE_TARBALL`; upload evidence on failure.
 - `core-required` (`name: core`, `needs: [build-package, package-smoke, tui-e2e]`, `if: always()`) — required aggregate. Check context stays `core` so branch protection (`["core", "changeset-check"]`) is unchanged; `core` now gates the full package boundary.
@@ -25,7 +25,7 @@ Three test layers:
 
 ## Canary (`.github/workflows/opencode-compatibility-canary.yml`)
 
-Weekly cron + `workflow_dispatch`, never on PRs. Resolves `opencode-ai@latest` exact version (surfaced via `::notice`, step summary, evidence metadata), packs own tarball, runs same harness. Non-required; failure evidence always uploaded. Pin-promotion: canary green on new version → PR edits `opencode-versions.json` → required matrix passes → merge.
+Weekly cron + `workflow_dispatch`, never on PRs. Scheduled runs resolve a frontier matrix (last 2 stable minors × latest 2 patches per minor) from the npm registry; manual dispatch runs a single validated version or dist-tag. Each cell resolves its exact version (surfaced via `::notice`, step summary, evidence metadata), packs own tarball (no cross-workflow artifact sharing), runs same harness. Non-required; failure evidence always uploaded. Pin-promotion: canary green on new version → PR edits `opencode-versions.json` → required matrix passes → merge.
 
 ## Build rewriting (`scripts/build.ts`, `scripts/transform-solid.mjs`)
 

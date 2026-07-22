@@ -40,7 +40,7 @@ diagnostics() {
   } >"$ARTIFACT_DIR/run-metadata.txt" 2>&1 || true
   if [[ "$PASSED" != true ]]; then
     printf 'OpenCode TUI regression failed. Diagnostics retained: %s\n' "$ARTIFACT_DIR" >&2
-    for file in install.stdout install.stderr pane.txt tui.stderr; do
+    for file in install.stdout install.stderr pane.txt tui.stderr failure-reason.txt; do
       [[ -f "$ARTIFACT_DIR/$file" ]] && { printf '\n=== %s ===\n' "$file" >&2; cat "$ARTIFACT_DIR/$file" >&2; }
     done
     file=data/opencode/log/opencode.log
@@ -53,7 +53,9 @@ diagnostics() {
   tmux -S "$SOCKET" kill-server 2>/dev/null || true
   rm -f "$SOCKET"
 }
-trap diagnostics EXIT INT TERM
+trap diagnostics EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 # wait_for <seconds> <description> <pattern> [pattern...]
 # Polls the tmux pane until every extended-regex pattern is visible or the

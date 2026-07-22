@@ -131,6 +131,7 @@ jobs:
           $tarball = Get-ChildItem package/*.tgz
           $actual = (Get-FileHash $tarball -Algorithm SHA256).Hash.ToLower()
           if ($actual -ne $metadata.sha256) { throw "tarball sha256 mismatch: expected $($metadata.sha256), got $actual" }
+          Write-Host "Verified artifact: $($metadata.filename) sha256=$actual"
 
           $tempHome = Join-Path ([IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString())
           New-Item -ItemType Directory -Path $tempHome -Force | Out-Null
