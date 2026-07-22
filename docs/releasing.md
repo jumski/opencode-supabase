@@ -23,6 +23,27 @@ This doc also acts as the transfer checklist for moving the repo to `supabase-co
 - Release workflow: `.github/workflows/release.yml`
 - CI workflow: `.github/workflows/ci.yml`
 
+## OpenCode Compatibility Policy
+
+Supported OpenCode host versions are declared in `.github/opencode-versions.json`:
+
+- `floor`: oldest supported version
+- `pinned`: current verified version
+
+The required `tui-e2e` CI job renders the packed plugin in a real OpenCode + tmux host against both versions on every PR. `package-smoke` verifies the Windows install boundary at `pinned`.
+
+A scheduled canary (`.github/workflows/opencode-compatibility-canary.yml`, weekly Monday at 06:17 UTC + manual) runs the TUI harness against a **dynamic frontier matrix** — the last 2 minor lines × the latest 2 patches each (e.g. 1.17.19, 1.17.20, 1.18.3, 1.18.4). It never blocks PRs.
+
+**Manual dispatch** (triggered from the Actions tab) accepts an optional `opencode-version` (exact version or dist-tag like `beta`, `0.0.0-beta-…`, `2.0.0-beta.1`) and an optional `reason` label. When supplied, the dynamic matrix is skipped and a single cell runs against that version. This is the prescribed way to smoke unreleased or snapshot builds before they appear as stable releases. The resolved version, matrix contents, and overall result are surfaced as run annotations, in the step summary, and in the uploaded evidence.
+
+Promotion process when the canary passes on a newer release:
+
+1. Open a PR editing only `.github/opencode-versions.json` (advance `pinned`; advance `floor` only when dropping support intentionally).
+2. The required matrix must pass on that PR.
+3. Merge advances the supported current version.
+
+If the canary fails on a new release, investigate before users hit it; do not advance `pinned`.
+
 ## One-Time Setup
 
 ### npm
@@ -76,6 +97,8 @@ Quick validation before first release:
   - `changeset-check`
 - Ensure GitHub Actions are enabled
 - Ensure default branch is `main`
+
+Note: the `core` check is the aggregate of the full package boundary (`build-package`, `package-smoke`, and the `tui-e2e` matrix in `.github/workflows/ci.yml`). The context names are unchanged, so existing branch protection already gates all package jobs — no protection update is needed when package jobs are added or renamed, as long as the aggregate keeps `name: core`.
 
 Create the required label with GitHub CLI:
 

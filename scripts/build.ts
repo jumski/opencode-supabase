@@ -1,33 +1,22 @@
 import { rm } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import { runtimeModuleIdForSpecifier } from "@opentui/core/runtime-plugin";
+import { hostRuntimeSpecifiers, runtimeModuleIdForSpecifier } from "./host-runtime-rewrite.mjs";
 
 const transform = fileURLToPath(new URL("transform-solid.mjs", import.meta.url));
-const hostRuntimeSpecifiers = [
-  "@opentui/core",
-  "@opentui/solid",
-  "@opentui/solid/components",
-  "@opentui/solid/jsx-runtime",
-  "@opentui/solid/jsx-dev-runtime",
-  "solid-js",
-  "solid-js/store",
-] as const;
 
 const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const hostRuntimeFilter = new RegExp(`^(?:${hostRuntimeSpecifiers.map(escapeRegExp).join("|")})$`);
-const hostRuntimeImportFilter = new RegExp(`(["'])(?:${hostRuntimeSpecifiers.map(escapeRegExp).join("|")})\\1`, "g");
 
+// TSX files are compiled by `transform-solid.mjs`, whose Babel plugin rewrites
+// host-runtime import specifiers to `opentui:runtime-module:*` ids in an
+// import-aware way (see scripts/host-runtime-rewrite.mjs).
 const solid = {
   name: "solid",
   setup(build: Bun.PluginBuilder) {
     build.onLoad({ filter: /\.tsx$/ }, ({ path }) => {
       const result = Bun.spawnSync(["node", transform, path]);
       if (result.exitCode !== 0) throw new Error(new TextDecoder().decode(result.stderr));
-      const contents = new TextDecoder().decode(result.stdout).replace(hostRuntimeImportFilter, (match) => {
-        const quote = match[0];
-        return `${quote}${runtimeModuleIdForSpecifier(match.slice(1, -1))}${quote}`;
-      });
-      return { contents, loader: "js" } as const;
+      return { contents: new TextDecoder().decode(result.stdout), loader: "js" } as const;
     });
   },
 };

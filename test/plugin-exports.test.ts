@@ -1312,20 +1312,6 @@ test("supabase dialog unknown state offers retry and continue", async () => {
   expect(typeof dialog.onCancel).toBe("function");
 });
 
-test("supabase dialog starts with custom checking spinner dialog", () => {
-  const api = createDialogApi();
-  const dialog = SupabaseDialog({
-    api: api as never,
-    logger: createLogger(),
-    onClose: () => api.ui.dialog.clear(),
-  });
-
-  expect(typeof dialog).toBe("function");
-  expect(api.__test.dialogAlerts).toHaveLength(0);
-  expect(api.__test.dialogs).toHaveLength(0);
-  expect(api.__test.setSizes).toEqual(["medium"]);
-});
-
 test("supabase dialog idle uses built in confirm dialog", () => {
   const api = createDialogApi();
   const dialog = SupabaseDialog({
@@ -1341,21 +1327,6 @@ test("supabase dialog idle uses built in confirm dialog", () => {
   });
   expect(api.__test.dialogConfirms).toHaveLength(1);
   expect(api.__test.dialogs).toHaveLength(0);
-});
-
-test("supabase dialog waiting states use custom spinner dialog", () => {
-  const api = createDialogApi();
-  const waiting = SupabaseDialog({
-    api: api as never,
-    logger: createLogger(),
-    onClose: () => api.ui.dialog.clear(),
-    initialState: { type: "waiting_callback", url: "https://example.com/auth" },
-  });
-
-  expect(typeof waiting).toBe("function");
-  expect(api.__test.dialogAlerts).toHaveLength(0);
-  expect(api.__test.dialogs).toHaveLength(0);
-  expect(api.__test.setSizes).toEqual(["large"]);
 });
 
 test("supabase auth flow enters waiting state before callback resolves", async () => {

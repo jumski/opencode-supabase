@@ -29,6 +29,30 @@ bun run test test/phase1-package-contract.test.ts
 
 Do not run raw `bun test` for repository verification. The package script loads required TUI preloads.
 
+## Package Verification
+
+CI builds one npm tarball per run (`build-package` job) and every package-facing job verifies that exact file by SHA-256. The packed-artifact test suite checks the same tarball when `PACKAGE_TARBALL` is set:
+
+```bash
+npm pack --json                    # builds dist/ via prepack
+PACKAGE_TARBALL="$(pwd)/opencode-supabase-<version>.tgz" bun run test test/packed-tui-entrypoint.test.ts
+```
+
+Without `PACKAGE_TARBALL` the suite packs its own tarball, so plain `bun run test` stays self-contained.
+
+To exercise the packed TUI inside a real OpenCode host locally (requires tmux, jq, and GNU coreutils `timeout`):
+
+```bash
+# install a pinned OpenCode somewhere isolated
+mkdir -p /tmp/oc && cd /tmp/oc && npm install --no-save opencode-ai@1.17.14 && cd -
+
+OPENCODE_BIN=/tmp/oc/node_modules/.bin/opencode \
+PACKAGE_TARBALL="$(pwd)/opencode-supabase-<version>.tgz" \
+scripts/test-opencode-tui-package.sh
+```
+
+Without `PACKAGE_TARBALL` the harness packs the repo itself. Evidence (pane capture, plugin metadata, tool versions, tarball SHA-256) is retained in the artifact dir it prints.
+
 ## Plugin Surface
 
 Server export: `src/server/index.ts`.
