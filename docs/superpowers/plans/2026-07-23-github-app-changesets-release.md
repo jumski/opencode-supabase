@@ -14,7 +14,7 @@
 - Use `actions/create-github-app-token@v2` with repository owner and current repository name.
 - Preserve npm trusted publishing via existing `id-token: write` permission.
 - Do not alter release commands, Bun/Node versions, or release trigger.
-- Replace every `CHANGESETS_TOKEN` documentation reference with GitHub App guidance.
+- Replace every reference to previous Changesets PAT secret in documentation with GitHub App guidance.
 - Verify with project scripts, not raw `bun test`.
 
 ---
@@ -54,7 +54,7 @@ test("release workflow uses its app token for repository writes", () => {
 
 Run: `bun run test test/release-workflow.test.ts`
 
-Expected: FAIL because `release.yml` still uses `secrets.CHANGESETS_TOKEN` and has no `app-token` step.
+Expected: FAIL because `release.yml` still uses previous Changesets PAT secret and has no `app-token` step.
 
 - [ ] **Step 3: Mint token and replace all PAT use**
 
