@@ -17,19 +17,29 @@ jobs:
     name: Release
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.CHANGESETS_TOKEN }}
-
-      - name: Verify CHANGESETS_TOKEN
+      - name: Verify Changesets App secrets
         run: |
-          if [ -z "$CHANGESETS_TOKEN" ]; then
-            echo "::error::CHANGESETS_TOKEN secret is missing or empty. See docs/releasing.md > One-Time Setup > GitHub."
+          if [ -z "$CHANGESETS_APP_ID" ] || [ -z "$CHANGESETS_APP_PRIVATE_KEY" ]; then
+            echo "::error::CHANGESETS_APP_ID and CHANGESETS_APP_PRIVATE_KEY secrets must both be set. See docs/releasing.md > One-Time Setup > GitHub."
             exit 1
           fi
         env:
-          CHANGESETS_TOKEN: ${{ secrets.CHANGESETS_TOKEN }}
+          CHANGESETS_APP_ID: ${{ secrets.CHANGESETS_APP_ID }}
+          CHANGESETS_APP_PRIVATE_KEY: ${{ secrets.CHANGESETS_APP_PRIVATE_KEY }}
+
+      - name: Mint Changesets App token
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.CHANGESETS_APP_ID }}
+          private-key: ${{ secrets.CHANGESETS_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ steps.app-token.outputs.token }}
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -51,4 +61,4 @@ jobs:
           version: bun run version-packages
           publish: bun run release
         env:
-          GITHUB_TOKEN: ${{ secrets.CHANGESETS_TOKEN }}
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}

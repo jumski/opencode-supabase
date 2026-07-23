@@ -66,28 +66,25 @@ Quick validation before first release:
 
 ### GitHub
 
-- Create a fine-grained personal access token for changesets:
-  - Go to GitHub Settings > Developer settings > Fine-grained tokens
-  - Repository access: only this repository
-  - Token expiration: maximum allowed (1 year). Set a calendar reminder to renew at ~10 months.
-  - Permissions:
+- Create an organization-owned GitHub App for Changesets. Do not configure a webhook.
+- Give the app these repository permissions:
 
-    | Permission    | Access       | Why                                                      |
-    | ------------- | ------------ | -------------------------------------------------------- |
-    | Contents      | Read and write | Checkout, push version commits, create release PR branch |
-    | Pull requests | Read and write | Create and update the Version Packages PR                |
-    | Metadata      | Read         | Required by GitHub for all API access                    |
+  | Permission | Access | Why |
+  | --- | --- | --- |
+  | Contents | Read and write | Checkout, push version commits, create release PR branch |
+  | Pull requests | Read and write | Create and update the Version Packages PR |
 
-    Note: The "Workflows" permission is **not** needed. Only the built-in `GITHUB_TOKEN` cannot trigger other workflows; a PAT push triggers CI automatically.
+  Metadata read access is included automatically by GitHub. The "Workflows" permission is not needed.
 
-  - Add the token as GitHub Actions secret `CHANGESETS_TOKEN`
-  - Why: `GITHUB_TOKEN` pushes from GitHub Actions do not trigger other workflows. The changesets release PR would never get CI checks without a separate token. See [GitHub docs on GITHUB_TOKEN limitations](https://docs.github.com/en/actions/concepts/security/github_token#when-github_token-triggers-workflow-runs).
-  - Ownership: the token is tied to the GitHub account that created it. If that account leaves the org or is deactivated, the token stops working immediately. Prefer creating the token from a shared bot account or a team-owned account. If neither is available, document which maintainer owns the token and track renewal in a shared calendar.
-  - Renewal steps:
-    1. Create a new fine-grained PAT with the same permissions listed above.
-    2. Update the `CHANGESETS_TOKEN` GitHub Actions secret with the new value.
-    3. Delete the old token in GitHub Settings > Developer settings > Fine-grained tokens.
-    4. Re-trigger the Release workflow to verify the new token works.
+- Install the app on only `supabase-community/opencode-supabase`.
+- Generate a private key for the app. Store the app ID as GitHub Actions secret `CHANGESETS_APP_ID` and the full private-key value as `CHANGESETS_APP_PRIVATE_KEY`.
+- Why: `GITHUB_TOKEN` pushes from GitHub Actions do not trigger other workflows. The short-lived GitHub App installation token can create the release PR and its updates trigger CI. See [GitHub docs on GITHUB_TOKEN limitations](https://docs.github.com/en/actions/concepts/security/github_token#when-github_token-triggers-workflow-runs).
+- Ownership: the app belongs to the organization, so release access does not depend on an individual maintainer account.
+- Key rotation:
+  1. Generate a new private key for the GitHub App.
+  2. Update the `CHANGESETS_APP_PRIVATE_KEY` GitHub Actions secret.
+  3. Revoke the old private key in the GitHub App settings.
+  4. Re-trigger the Release workflow to verify the new key works.
 - Create required labels:
   - `no-changeset` for PRs that should skip Changesets enforcement
 - Protect `main`
@@ -254,7 +251,7 @@ Optional hardening:
 ### Release PR has no CI checks
 
 - `GITHUB_TOKEN` pushes do not trigger workflows — this is a GitHub Actions limitation
-- Verify `CHANGESETS_TOKEN` is configured correctly (see [One-Time Setup > GitHub](#github))
+- Verify `CHANGESETS_APP_ID` and `CHANGESETS_APP_PRIVATE_KEY` are configured correctly (see [One-Time Setup > GitHub](#github))
 - Re-trigger the Release workflow after fixing the secret
 
 ### Bad release PR contents
@@ -278,7 +275,7 @@ When the repo moves:
 - update `package.json` repository metadata to `git+https://github.com/supabase-community/opencode-supabase.git`
 - verify GitHub Actions remain enabled
 - verify the default branch is still `main`
-- recreate `CHANGESETS_TOKEN` fine-grained PAT (the old token is scoped to the original repo and will not transfer); see [One-Time Setup > GitHub](#github) for required permissions and creation steps
+- confirm the GitHub App is installed only on `supabase-community/opencode-supabase` and `CHANGESETS_APP_ID` and `CHANGESETS_APP_PRIVATE_KEY` are configured; see [One-Time Setup > GitHub](#github)
 - recreate required labels if missing:
   - `no-changeset`
 - reapply branch protection rules
@@ -329,7 +326,8 @@ EOF
 ## First Release Checklist
 
 - Changesets setup branch merged
-- `CHANGESETS_TOKEN` configured
+- GitHub App installed only on `supabase-community/opencode-supabase`
+- `CHANGESETS_APP_ID` and `CHANGESETS_APP_PRIVATE_KEY` configured
 - npm Trusted Publisher configured for `supabase-community/opencode-supabase/release.yml`
 - `no-changeset` label exists
 - branch protection configured
